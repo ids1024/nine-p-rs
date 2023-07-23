@@ -40,7 +40,7 @@ fn main() -> Result<(), nine_p::Error> {
         0,
         nine_p::TWalk {
             fid: Fid(0),
-            newfid: Fid(0),
+            newfid: Fid(1),
             wnames: vec!["usr", "lib"],
         },
     )?;

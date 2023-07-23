@@ -433,6 +433,27 @@ pub struct TClunk {
     pub fid: Fid,
 }
 
+impl<'a> Message<'a> for TClunk {
+    const TYPE: MessageType = MessageType::TClunk;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        Ok(())
+    }
+}
+
+impl<'a> TMessage<'a> for TClunk {
+    type RMessage<'b> = RClunk;
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RClunk;
 
