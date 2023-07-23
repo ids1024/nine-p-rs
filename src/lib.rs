@@ -2,12 +2,15 @@
 
 // TODO: no-copy parsing from virtio ring buffer?
 // - even if we copy soon after, want to avoid copying twice. at least.
+// TODO: avoid multiple small writes? buffer without copy?
 
 use std::{io, str};
 
 mod error;
 pub use error::Error;
 mod sync_client;
+#[cfg(feature = "tokio")]
+mod tokio_server;
 pub use sync_client::SyncClient;
 
 // Defined by fcall.h
