@@ -29,9 +29,9 @@ impl Header {
 
     #[inline]
     pub fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.size.to_le_bytes())?;
-        writer.write(&[self.type_])?;
-        writer.write(&self.tag.to_le_bytes())?;
+        writer.write_all(&self.size.to_le_bytes())?;
+        writer.write_all(&[self.type_])?;
+        writer.write_all(&self.tag.to_le_bytes())?;
         Ok(())
     }
 
@@ -41,9 +41,9 @@ impl Header {
         mut writer: T,
     ) -> io::Result<()> {
         use tokio::io::AsyncWriteExt;
-        writer.write(&self.size.to_le_bytes()).await?;
-        writer.write(&[self.type_]).await?;
-        writer.write(&self.tag.to_le_bytes()).await?;
+        writer.write_all(&self.size.to_le_bytes()).await?;
+        writer.write_all(&[self.type_]).await?;
+        writer.write_all(&self.tag.to_le_bytes()).await?;
         Ok(())
     }
 }

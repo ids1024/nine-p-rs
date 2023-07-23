@@ -116,9 +116,9 @@ impl<'a> Message<'a> for TVersion<'a> {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.msize.to_le_bytes())?;
-        writer.write(&(self.version.len() as u16).to_le_bytes())?;
-        writer.write(self.version.as_bytes())?;
+        writer.write_all(&self.msize.to_le_bytes())?;
+        writer.write_all(&(self.version.len() as u16).to_le_bytes())?;
+        writer.write_all(self.version.as_bytes())?;
         Ok(())
     }
 }
@@ -154,9 +154,9 @@ impl<'a> Message<'a> for RVersion<'a> {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.msize.to_le_bytes())?;
-        writer.write(&(self.version.len() as u16).to_le_bytes())?;
-        writer.write(self.version.as_bytes())?;
+        writer.write_all(&self.msize.to_le_bytes())?;
+        writer.write_all(&(self.version.len() as u16).to_le_bytes())?;
+        writer.write_all(self.version.as_bytes())?;
         Ok(())
     }
 }
@@ -180,11 +180,11 @@ impl<'a> Message<'a> for TAuth<'a> {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.afid.0.to_le_bytes())?;
-        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
-        writer.write(self.uname.as_bytes())?;
-        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
-        writer.write(self.aname.as_bytes())?;
+        writer.write_all(&self.afid.0.to_le_bytes())?;
+        writer.write_all(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write_all(self.uname.as_bytes())?;
+        writer.write_all(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write_all(self.aname.as_bytes())?;
         Ok(())
     }
 }
@@ -270,12 +270,12 @@ impl<'a> Message<'a> for TAttach<'a> {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.fid.0.to_le_bytes())?;
-        writer.write(&self.afid.0.to_le_bytes())?;
-        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
-        writer.write(self.uname.as_bytes())?;
-        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
-        writer.write(self.aname.as_bytes())?;
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&self.afid.0.to_le_bytes())?;
+        writer.write_all(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write_all(self.uname.as_bytes())?;
+        writer.write_all(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write_all(self.aname.as_bytes())?;
         Ok(())
     }
 }
@@ -333,12 +333,12 @@ impl<'a> Message<'a> for TWalk<'a> {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.fid.0.to_le_bytes())?;
-        writer.write(&self.newfid.0.to_le_bytes())?;
-        writer.write(&(self.wnames.len() as u16).to_le_bytes())?;
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&self.newfid.0.to_le_bytes())?;
+        writer.write_all(&(self.wnames.len() as u16).to_le_bytes())?;
         for wname in &self.wnames {
-            writer.write(&(wname.len() as u16).to_le_bytes())?;
-            writer.write(wname.as_bytes())?;
+            writer.write_all(&(wname.len() as u16).to_le_bytes())?;
+            writer.write_all(wname.as_bytes())?;
         }
         Ok(())
     }
@@ -445,7 +445,7 @@ impl<'a> Message<'a> for TClunk {
     }
 
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&self.fid.0.to_le_bytes())?;
         Ok(())
     }
 }
