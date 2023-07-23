@@ -3,11 +3,14 @@
 // TODO: no-copy parsing from virtio ring buffer?
 // - even if we copy soon after, want to avoid copying twice. at least.
 // TODO: avoid multiple small writes? buffer without copy?
+// - maybe the trick is to buffer everything other than large payloads. or use readv/writev.
 
 use std::{io, str};
 
 mod error;
 pub use error::Error;
+mod header;
+use header::Header;
 mod sync_client;
 #[cfg(feature = "tokio")]
 mod tokio_server;
