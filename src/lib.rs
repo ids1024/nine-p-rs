@@ -4,6 +4,8 @@
 // - even if we copy soon after, want to avoid copying twice. at least.
 // TODO: avoid multiple small writes? buffer without copy?
 // - maybe the trick is to buffer everything other than large payloads. or use readv/writev.
+// Many messages are fixed size. Things like Walk should be relatively small. Read/Write may be
+// huge.
 
 use std::{io, str};
 
@@ -45,12 +47,15 @@ pub enum MessageType {
     RRemove = 123,
     TStat = 124,
     RStat = 125,
-    TWstat = 126,
-    RWstat = 127,
+    TWStat = 126,
+    RWStat = 127,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Qid([u8; 13]);
+
+unsafe impl bytemuck::Pod for Qid {}
+unsafe impl bytemuck::Zeroable for Qid {}
 
 #[derive(Clone, Debug, Default)]
 pub struct Fid(pub u32);
@@ -253,23 +258,124 @@ pub struct TAttach<'a> {
     pub aname: &'a str,
 }
 
+impl<'a> Message<'a> for TAttach<'a> {
+    const TYPE: MessageType = MessageType::TAttach;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 4 + 2 + self.uname.len() + 2 + self.aname.len()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.afid.0.to_le_bytes())?;
+        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write(self.uname.as_bytes())?;
+        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write(self.aname.as_bytes())?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RAttach {
     pub qid: Qid,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct TWalk {
-    pub fid: Fid,
-    pub newfid: Fid,
-    pub nwname: u16,
-    // XXX ?
+impl<'a> Message<'a> for RAttach {
+    const TYPE: MessageType = MessageType::RAttach;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() != 13 {
+            return Err(Error::MessageLength);
+        }
+        Ok(RAttach {
+            qid: Qid([
+                body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
+                body[9], body[10], body[11], body[12],
+            ]),
+        })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TAttach<'a> {
+    type RMessage<'b> = RAttach;
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct RWalk {
-    pub nwqid: u16,
-    // XXX
+pub struct TWalk<'a> {
+    pub fid: Fid,
+    pub newfid: Fid,
+    // XXX use &[&str] in argument, but `Vec` for return?
+    pub wnames: Vec<&'a str>,
+}
+
+impl<'a> Message<'a> for TWalk<'a> {
+    const TYPE: MessageType = MessageType::TWalk;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 4 + 2 + 2 * self.wnames.len() + self.wnames.iter().map(|x| x.len()).sum::<usize>()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.newfid.0.to_le_bytes())?;
+        writer.write(&(self.wnames.len() as u16).to_le_bytes())?;
+        for wname in &self.wnames {
+            writer.write(&(wname.len() as u16).to_le_bytes())?;
+            writer.write(wname.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RWalk<'a> {
+    qids: &'a [Qid],
+}
+
+impl<'a> Message<'a> for RWalk<'a> {
+    const TYPE: MessageType = MessageType::RWalk;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() < 2 {
+            return Err(Error::MessageLength);
+        }
+        let len = u16::from_le_bytes([body[0], body[1]]);
+        if body.len() < 2 + 13 * len as usize {
+            return Err(Error::MessageLength);
+        }
+        Ok(RWalk {
+            qids: bytemuck::cast_slice(&body[2..]),
+        })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TWalk<'a> {
+    type RMessage<'b> = RWalk<'b>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -360,3 +466,5 @@ pub struct TWStat<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct RWStat;
+
+impl_empty_message!(RWStat, MessageType::RWStat);
