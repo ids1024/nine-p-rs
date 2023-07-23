@@ -3,6 +3,7 @@ use std::net::TcpStream;
 fn main() -> Result<(), nine_p::Error> {
     let stream = TcpStream::connect("localhost:564")?;
     let mut client = nine_p::SyncClient::new(stream);
+
     let res = client.send(
         65535,
         nine_p::TVersion {
@@ -11,5 +12,16 @@ fn main() -> Result<(), nine_p::Error> {
         },
     )?;
     println!("{:?}", res);
+
+    let res = client.send(
+        0,
+        nine_p::TAuth {
+            afid: nine_p::Fid(0),
+            uname: "foo",
+            aname: "bar",
+        },
+    )?;
+    println!("{:?}", res);
+
     Ok(())
 }

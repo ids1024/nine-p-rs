@@ -1,5 +1,8 @@
 // http://man.cat-v.org/plan_9/5/intro
 
+// TODO: no-copy parsing from virtio ring buffer?
+// - even if we copy soon after, want to avoid copying twice. at least.
+
 use std::{error, fmt, io, str};
 
 #[derive(Debug)]
@@ -7,7 +10,7 @@ pub enum Error {
     Io(io::Error),
     Utf8(str::Utf8Error),
     MessageLength,
-    UnrecognizedTag(u32),
+    UnrecognizedTag(u16),
     UnexpectedType(u8),
     Protocol(String),
 }
@@ -69,7 +72,7 @@ pub enum MessageType {
 pub struct Qid([u8; 13]);
 
 #[derive(Clone, Debug, Default)]
-pub struct Fid(u32);
+pub struct Fid(pub u32);
 
 pub trait Message<'a>: Sized {
     const TYPE: MessageType;
@@ -179,14 +182,86 @@ pub struct TAuth<'a> {
     pub aname: &'a str,
 }
 
+impl<'a> Message<'a> for TAuth<'a> {
+    const TYPE: MessageType = MessageType::TAuth;
+
+    fn parse(_body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 2 + self.uname.len() + 2 + self.aname.len()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write(&self.afid.0.to_le_bytes())?;
+        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write(self.uname.as_bytes())?;
+        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write(self.aname.as_bytes())?;
+        Ok(())
+    }
+}
+
+impl<'a> TMessage<'a> for TAuth<'a> {
+    type RMessage<'b> = RAuth;
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RAuth {
     pub aqid: Qid,
 }
 
+impl<'a> Message<'a> for RAuth {
+    const TYPE: MessageType = MessageType::RAuth;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() != 13 {
+            return Err(Error::MessageLength);
+        }
+        Ok(RAuth {
+            aqid: Qid([
+                body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
+                body[9], body[10], body[11], body[12],
+            ]),
+        })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RError<'a> {
     pub ename: &'a str,
+}
+
+impl<'a> Message<'a> for RError<'a> {
+    const TYPE: MessageType = MessageType::RError;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() < 2 {
+            return Err(Error::MessageLength);
+        }
+        if body.len() != 2 + usize::from(u16::from_le_bytes([body[0], body[1]])) {
+            return Err(Error::MessageLength);
+        }
+        let ename = str::from_utf8(&body[2..])?;
+        Ok(RError { ename })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -325,7 +400,7 @@ impl<T: io::Read + io::Write> SyncClient<T> {
         &mut self,
         tag: u16,
         request: Req,
-    ) -> io::Result<Req::RMessage<'_>> {
+    ) -> Result<Req::RMessage<'_>, Error> {
         self.transport
             .write(&(7 + request.size() as u32).to_le_bytes())?;
         self.transport.write(&[Req::TYPE as u8])?;
@@ -337,12 +412,20 @@ impl<T: io::Read + io::Write> SyncClient<T> {
         let size = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
         let type_ = header[4];
         let resp_tag = u16::from_le_bytes([header[5], header[6]]);
-        assert!(resp_tag == tag); // XXX assert
-        assert!(type_ == Req::RMessage::TYPE as u8); // XXX assert
+        if resp_tag != tag {
+            return Err(Error::UnrecognizedTag(resp_tag));
+        }
         self.buffer.resize(size as usize - 7, 0); // XXX efficiency
                                                   // XXX handle error return
         self.transport.read_exact(&mut self.buffer)?;
-        // XXX unwrap
-        Ok(Req::RMessage::parse(&self.buffer).unwrap())
+        if type_ == Req::RMessage::TYPE as u8 {
+            Req::RMessage::parse(&self.buffer)
+        } else if type_ == RError::TYPE as u8 {
+            Err(Error::Protocol(
+                RError::parse(&self.buffer)?.ename.to_string(),
+            ))
+        } else {
+            Err(Error::UnexpectedType(type_))
+        }
     }
 }
