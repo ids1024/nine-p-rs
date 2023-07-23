@@ -3,37 +3,12 @@
 // TODO: no-copy parsing from virtio ring buffer?
 // - even if we copy soon after, want to avoid copying twice. at least.
 
-use std::{error, fmt, io, str};
+use std::{io, str};
 
-#[derive(Debug)]
-pub enum Error {
-    Io(io::Error),
-    Utf8(str::Utf8Error),
-    MessageLength,
-    UnrecognizedTag(u16),
-    UnexpectedType(u8),
-    Protocol(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self) // XXX
-    }
-}
-
-impl error::Error for Error {}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<str::Utf8Error> for Error {
-    fn from(error: str::Utf8Error) -> Self {
-        Self::Utf8(error)
-    }
-}
+mod error;
+pub use error::Error;
+mod sync_client;
+pub use sync_client::SyncClient;
 
 // Defined by fcall.h
 #[repr(u8)]
@@ -231,7 +206,7 @@ impl<'a> Message<'a> for RAuth {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: io::Write>(&self, _writer: T) -> io::Result<()> {
         todo!()
     }
 }
@@ -259,7 +234,7 @@ impl<'a> Message<'a> for RError<'a> {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: io::Write>(&self, _writer: T) -> io::Result<()> {
         todo!()
     }
 }
@@ -379,53 +354,3 @@ pub struct TWStat<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct RWStat;
-
-/// Simple client that sends a command then blocks until it gets a reply
-pub struct SyncClient<T: io::Read + io::Write> {
-    transport: T,
-    buffer: Vec<u8>,
-}
-
-impl<T: io::Read + io::Write> SyncClient<T> {
-    pub fn new(transport: T) -> Self {
-        Self {
-            transport,
-            buffer: Vec::new(),
-        }
-    }
-
-    // XXX return lifetime?
-    // XXX for read, how could we pass a buffer to read into?
-    pub fn send<'a, Req: TMessage<'a>>(
-        &mut self,
-        tag: u16,
-        request: Req,
-    ) -> Result<Req::RMessage<'_>, Error> {
-        self.transport
-            .write(&(7 + request.size() as u32).to_le_bytes())?;
-        self.transport.write(&[Req::TYPE as u8])?;
-        self.transport.write(&tag.to_le_bytes())?;
-        request.write(&mut self.transport)?;
-
-        let mut header = [0; 7];
-        self.transport.read_exact(&mut header)?;
-        let size = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
-        let type_ = header[4];
-        let resp_tag = u16::from_le_bytes([header[5], header[6]]);
-        if resp_tag != tag {
-            return Err(Error::UnrecognizedTag(resp_tag));
-        }
-        self.buffer.resize(size as usize - 7, 0); // XXX efficiency
-                                                  // XXX handle error return
-        self.transport.read_exact(&mut self.buffer)?;
-        if type_ == Req::RMessage::TYPE as u8 {
-            Req::RMessage::parse(&self.buffer)
-        } else if type_ == RError::TYPE as u8 {
-            Err(Error::Protocol(
-                RError::parse(&self.buffer)?.ename.to_string(),
-            ))
-        } else {
-            Err(Error::UnexpectedType(type_))
-        }
-    }
-}
