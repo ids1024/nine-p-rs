@@ -474,15 +474,82 @@ pub struct TStat {
     pub fid: Fid,
 }
 
+impl<'a> Message<'a> for TStat {
+    const TYPE: MessageType = MessageType::TStat;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RStat<'a> {
     pub stat: &'a [u8],
+}
+
+impl<'a> Message<'a> for RStat<'a> {
+    const TYPE: MessageType = MessageType::RStat;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() < 2 {
+            return Err(Error::MessageLength);
+        }
+        let len = u16::from_le_bytes([body[0], body[1]]) as usize;
+        if body.len() < 2 + len {
+            return Err(Error::MessageLength);
+        }
+        Ok(RStat { stat: &body[2..] })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TStat {
+    type RMessage<'b> = RStat<'b>;
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct TWStat<'a> {
     pub fid: Fid,
     pub stat: &'a [u8],
+}
+
+impl<'a> Message<'a> for TWStat<'a> {
+    const TYPE: MessageType = MessageType::TWStat;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 2 + self.stat.len()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&(self.stat.len() as u16).to_le_bytes())?;
+        writer.write_all(&self.stat)?;
+        Ok(())
+    }
+}
+
+impl<'a> TMessage<'a> for TWStat<'a> {
+    type RMessage<'b> = RWStat;
 }
 
 #[derive(Clone, Debug, Default)]
