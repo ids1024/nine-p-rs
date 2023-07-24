@@ -384,10 +384,56 @@ pub struct TOpen {
     pub mode: u8,
 }
 
+impl<'a> Message<'a> for TOpen {
+    const TYPE: MessageType = MessageType::TOpen;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 1
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&[self.mode])?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ROpen {
     pub qid: Qid,
     pub iounit: u32,
+}
+
+impl<'a> Message<'a> for ROpen {
+    const TYPE: MessageType = MessageType::ROpen;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() != 13 + 4 {
+            return Err(Error::MessageLength);
+        }
+        let qid = Qid([
+            body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
+            body[9], body[10], body[11], body[12],
+        ]);
+        let iounit = u32::from_le_bytes([body[13], body[14], body[15], body[16]]);
+        Ok(ROpen { qid, iounit })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TOpen {
+    type RMessage<'b> = ROpen;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -398,10 +444,59 @@ pub struct TCreate<'a> {
     pub mode: u8,
 }
 
+impl<'a> Message<'a> for TCreate<'a> {
+    const TYPE: MessageType = MessageType::TCreate;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 2 + self.name.len() + 4 + 1
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&(self.name.len() as u16).to_le_bytes())?;
+        writer.write_all(self.name.as_bytes())?;
+        writer.write_all(&self.perm.to_le_bytes())?;
+        writer.write_all(&[self.mode])?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RCreate {
     pub qid: Qid,
     pub iounit: u32,
+}
+
+impl<'a> Message<'a> for RCreate {
+    const TYPE: MessageType = MessageType::RCreate;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        if body.len() != 13 + 4 {
+            return Err(Error::MessageLength);
+        }
+        let qid = Qid([
+            body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
+            body[9], body[10], body[11], body[12],
+        ]);
+        let iounit = u32::from_le_bytes([body[13], body[14], body[15], body[16]]);
+        Ok(RCreate { qid, iounit })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TCreate<'a> {
+    type RMessage<'b> = RCreate;
 }
 
 #[derive(Clone, Debug, Default)]
