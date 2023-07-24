@@ -18,6 +18,60 @@ mod sync_client;
 mod tokio_server;
 pub use sync_client::SyncClient;
 
+trait Field<'a>: Sized {
+    fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error>;
+
+    // fn len(&self) -> usize;
+
+    // fn write<T: io::Write>(&self, iter: T) -> io::Result<()>;
+}
+
+impl<'a> Field<'a> for u16 {
+    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
+        if bytes.len() < 4 {
+            return Err(Error::MessageLength);
+        }
+        let value = u16::from_le_bytes([bytes[0], bytes[1]]);
+        Ok((&bytes[2..], value))
+    }
+}
+
+impl<'a> Field<'a> for u32 {
+    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
+        if bytes.len() < 4 {
+            return Err(Error::MessageLength);
+        }
+        let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        Ok((&bytes[4..], value))
+    }
+}
+
+impl<'a> Field<'a> for &'a [u8] {
+    fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
+        let (bytes, len) = u16::parse(bytes)?;
+        let len = len as usize;
+        if bytes.len() < len {
+            return Err(Error::MessageLength);
+        }
+        Ok((&bytes[len..], &bytes[..len]))
+    }
+}
+
+impl<'a> Field<'a> for &'a str {
+    fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
+        let (bytes, value) = <&[u8]>::parse(bytes)?;
+        Ok((bytes, str::from_utf8(value)?))
+    }
+}
+
+fn end_of_message<T>(bytes: &[u8], value: T) -> Result<T, Error> {
+    if bytes.is_empty() {
+        Ok(value)
+    } else {
+        Err(Error::MessageLength)
+    }
+}
+
 // Defined by fcall.h
 #[repr(u8)]
 pub enum MessageType {
@@ -57,6 +111,21 @@ pub struct Qid([u8; 13]);
 unsafe impl bytemuck::Pod for Qid {}
 unsafe impl bytemuck::Zeroable for Qid {}
 
+impl<'a> Field<'a> for Qid {
+    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
+        if bytes.len() < 13 {
+            return Err(Error::MessageLength);
+        }
+        Ok((
+            &bytes[13..],
+            Self([
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
+            ]),
+        ))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Fid(pub u32);
 
@@ -76,11 +145,7 @@ macro_rules! impl_empty_message {
             const TYPE: MessageType = $id;
 
             fn parse(body: &'a [u8]) -> Result<Self, Error> {
-                if body.is_empty() {
-                    Ok($type)
-                } else {
-                    Err(Error::MessageLength)
-                }
+                end_of_message(body, $type)
             }
 
             fn size(&self) -> usize {
@@ -137,16 +202,9 @@ impl<'a> Message<'a> for RVersion<'a> {
     const TYPE: MessageType = MessageType::RVersion;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() < 6 {
-            return Err(Error::MessageLength);
-        }
-        let msize = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
-        let version_len = u16::from_le_bytes([body[4], body[5]]);
-        if body.len() != 6 + usize::from(version_len) {
-            return Err(Error::MessageLength);
-        }
-        let version = str::from_utf8(&body[6..])?;
-        Ok(Self { msize, version })
+        let (body, msize) = u32::parse(body)?;
+        let (body, version) = <&str>::parse(body)?;
+        end_of_message(body, Self { msize, version })
     }
 
     fn size(&self) -> usize {
@@ -202,15 +260,8 @@ impl<'a> Message<'a> for RAuth {
     const TYPE: MessageType = MessageType::RAuth;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() != 13 {
-            return Err(Error::MessageLength);
-        }
-        Ok(RAuth {
-            aqid: Qid([
-                body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
-                body[9], body[10], body[11], body[12],
-            ]),
-        })
+        let (body, aqid) = Qid::parse(body)?;
+        end_of_message(body, RAuth { aqid })
     }
 
     fn size(&self) -> usize {
@@ -231,14 +282,8 @@ impl<'a> Message<'a> for RError<'a> {
     const TYPE: MessageType = MessageType::RError;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() < 2 {
-            return Err(Error::MessageLength);
-        }
-        if body.len() != 2 + usize::from(u16::from_le_bytes([body[0], body[1]])) {
-            return Err(Error::MessageLength);
-        }
-        let ename = str::from_utf8(&body[2..])?;
-        Ok(RError { ename })
+        let (body, ename) = <&str>::parse(body)?;
+        end_of_message(body, RError { ename })
     }
 
     fn size(&self) -> usize {
@@ -289,15 +334,8 @@ impl<'a> Message<'a> for RAttach {
     const TYPE: MessageType = MessageType::RAttach;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() != 13 {
-            return Err(Error::MessageLength);
-        }
-        Ok(RAttach {
-            qid: Qid([
-                body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
-                body[9], body[10], body[11], body[12],
-            ]),
-        })
+        let (body, qid) = Qid::parse(body)?;
+        end_of_message(body, RAttach { qid })
     }
 
     fn size(&self) -> usize {
@@ -353,15 +391,12 @@ impl<'a> Message<'a> for RWalk<'a> {
     const TYPE: MessageType = MessageType::RWalk;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() < 2 {
-            return Err(Error::MessageLength);
-        }
-        let len = u16::from_le_bytes([body[0], body[1]]);
-        if body.len() < 2 + 13 * len as usize {
+        let (body, len) = u16::parse(body)?;
+        if body.len() != 13 * len as usize {
             return Err(Error::MessageLength);
         }
         Ok(RWalk {
-            qids: bytemuck::cast_slice(&body[2..]),
+            qids: bytemuck::cast_slice(body),
         })
     }
 
@@ -412,15 +447,9 @@ impl<'a> Message<'a> for ROpen {
     const TYPE: MessageType = MessageType::ROpen;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() != 13 + 4 {
-            return Err(Error::MessageLength);
-        }
-        let qid = Qid([
-            body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
-            body[9], body[10], body[11], body[12],
-        ]);
-        let iounit = u32::from_le_bytes([body[13], body[14], body[15], body[16]]);
-        Ok(ROpen { qid, iounit })
+        let (body, qid) = Qid::parse(body)?;
+        let (body, iounit) = u32::parse(body)?;
+        end_of_message(body, ROpen { qid, iounit })
     }
 
     fn size(&self) -> usize {
@@ -475,15 +504,9 @@ impl<'a> Message<'a> for RCreate {
     const TYPE: MessageType = MessageType::RCreate;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() != 13 + 4 {
-            return Err(Error::MessageLength);
-        }
-        let qid = Qid([
-            body[0], body[1], body[2], body[3], body[4], body[5], body[6], body[7], body[8],
-            body[9], body[10], body[11], body[12],
-        ]);
-        let iounit = u32::from_le_bytes([body[13], body[14], body[15], body[16]]);
-        Ok(RCreate { qid, iounit })
+        let (body, qid) = Qid::parse(body)?;
+        let (body, iounit) = u32::parse(body)?;
+        end_of_message(body, RCreate { qid, iounit })
     }
 
     fn size(&self) -> usize {
@@ -595,14 +618,8 @@ impl<'a> Message<'a> for RStat<'a> {
     const TYPE: MessageType = MessageType::RStat;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        if body.len() < 2 {
-            return Err(Error::MessageLength);
-        }
-        let len = u16::from_le_bytes([body[0], body[1]]) as usize;
-        if body.len() < 2 + len {
-            return Err(Error::MessageLength);
-        }
-        Ok(RStat { stat: &body[2..] })
+        let (body, stat) = <&[u8]>::parse(body)?;
+        end_of_message(body, RStat { stat })
     }
 
     fn size(&self) -> usize {
