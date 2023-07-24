@@ -46,6 +46,18 @@ impl<'a> Field<'a> for u32 {
     }
 }
 
+impl<'a> Field<'a> for u64 {
+    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
+        if bytes.len() < 8 {
+            return Err(Error::MessageLength);
+        }
+        let value = u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]);
+        Ok((&bytes[8..], value))
+    }
+}
+
 impl<'a> Field<'a> for &'a [u8] {
     fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
         let (bytes, len) = u16::parse(bytes)?;
@@ -529,9 +541,53 @@ pub struct TRead {
     pub count: u32,
 }
 
+impl<'a> Message<'a> for TRead {
+    const TYPE: MessageType = MessageType::TRead;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        let (body, fid) = u32::parse(body)?;
+        let fid = Fid(fid);
+        let (body, offset) = u64::parse(body)?;
+        let (body, count) = u32::parse(body)?;
+        end_of_message(body, TRead { fid, offset, count })
+    }
+
+    fn size(&self) -> usize {
+        4 + 8 + 4
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&self.offset.to_le_bytes())?;
+        writer.write_all(&self.count.to_le_bytes())?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RRead<'a> {
     pub data: &'a [u8],
+}
+
+impl<'a> Message<'a> for RRead<'a> {
+    const TYPE: MessageType = MessageType::RRead;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        let (body, data) = <&[u8]>::parse(body)?;
+        end_of_message(body, RRead { data })
+    }
+
+    fn size(&self) -> usize {
+        todo!()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        todo!()
+    }
+}
+
+impl<'a> TMessage<'a> for TRead {
+    type RMessage<'b> = RRead<'b>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -541,9 +597,50 @@ pub struct TWrite<'a> {
     pub data: &'a [u8],
 }
 
+impl<'a> Message<'a> for TWrite<'a> {
+    const TYPE: MessageType = MessageType::TWrite;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4 + 8 + 2 + self.data.len()
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        writer.write_all(&self.offset.to_le_bytes())?;
+        writer.write_all(&self.data)?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RWrite {
     pub count: u32,
+}
+
+impl<'a> Message<'a> for RWrite {
+    const TYPE: MessageType = MessageType::RWrite;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        let (body, count) = u32::parse(body)?;
+        end_of_message(body, RWrite { count })
+    }
+
+    fn size(&self) -> usize {
+        4
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.count.to_le_bytes())?;
+        Ok(())
+    }
+}
+
+impl<'a> TMessage<'a> for TWrite<'a> {
+    type RMessage<'b> = RWrite;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -582,10 +679,31 @@ pub struct TRemove {
     pub fid: Fid,
 }
 
+impl<'a> Message<'a> for TRemove {
+    const TYPE: MessageType = MessageType::TRemove;
+
+    fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        todo!()
+    }
+
+    fn size(&self) -> usize {
+        4
+    }
+
+    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+        writer.write_all(&self.fid.0.to_le_bytes())?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RRemove;
 
 impl_empty_message!(RRemove, MessageType::RRemove);
+
+impl<'a> TMessage<'a> for TRemove {
+    type RMessage<'b> = RRemove;
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct TStat {
