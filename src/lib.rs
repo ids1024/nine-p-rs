@@ -128,6 +128,13 @@ impl<'a> Field<'a> for Qid {
 #[derive(Clone, Debug, Default)]
 pub struct Fid(pub u32);
 
+impl<'a> Field<'a> for Fid {
+    fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
+        let (bytes, value) = u32::parse(bytes)?;
+        Ok((bytes, Fid(value)))
+    }
+}
+
 pub trait Message<'a>: Sized {
     const TYPE: MessageType;
     /// Parse message pody
@@ -504,8 +511,7 @@ impl<'a> Message<'a> for TRead {
     const TYPE: MessageType = MessageType::TRead;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        let (body, fid) = u32::parse(body)?;
-        let fid = Fid(fid);
+        let (body, fid) = Fid::parse(body)?;
         let (body, offset) = u64::parse(body)?;
         let (body, count) = u32::parse(body)?;
         end_of_message(body, TRead { fid, offset, count })
