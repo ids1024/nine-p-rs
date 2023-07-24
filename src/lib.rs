@@ -26,37 +26,24 @@ trait Field<'a>: Sized {
     // fn write<T: io::Write>(&self, iter: T) -> io::Result<()>;
 }
 
-impl<'a> Field<'a> for u16 {
-    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
-        if bytes.len() < 4 {
-            return Err(Error::MessageLength);
+macro_rules! impl_field_le_bytes {
+    ($type:ty, $size:expr) => {
+        impl<'a> Field<'a> for $type {
+            fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
+                if let Some(value) = bytes.get(..$size) {
+                    let value = <$type>::from_le_bytes(<[u8; $size]>::try_from(value).unwrap());
+                    Ok((&bytes[$size..], value))
+                } else {
+                    Err(Error::MessageLength)
+                }
+            }
         }
-        let value = u16::from_le_bytes([bytes[0], bytes[1]]);
-        Ok((&bytes[2..], value))
-    }
+    };
 }
-
-impl<'a> Field<'a> for u32 {
-    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
-        if bytes.len() < 4 {
-            return Err(Error::MessageLength);
-        }
-        let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        Ok((&bytes[4..], value))
-    }
-}
-
-impl<'a> Field<'a> for u64 {
-    fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
-        if bytes.len() < 8 {
-            return Err(Error::MessageLength);
-        }
-        let value = u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]);
-        Ok((&bytes[8..], value))
-    }
-}
+impl_field_le_bytes!(u8, 1);
+impl_field_le_bytes!(u16, 2);
+impl_field_le_bytes!(u32, 4);
+impl_field_le_bytes!(u64, 8);
 
 impl<'a> Field<'a> for &'a [u8] {
     fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
