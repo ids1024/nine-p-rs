@@ -171,10 +171,6 @@ macro_rules! impl_empty_message {
     };
 }
 
-pub trait TMessage<'a>: Message<'a> {
-    type RMessage<'b>: Message<'b>;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TVersion<'a> {
     pub msize: u32,
@@ -198,10 +194,6 @@ impl<'a> Message<'a> for TVersion<'a> {
         writer.write_all(self.version.as_bytes())?;
         Ok(())
     }
-}
-
-impl<'a> TMessage<'a> for TVersion<'a> {
-    type RMessage<'b> = RVersion<'b>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -257,10 +249,6 @@ impl<'a> Message<'a> for TAuth<'a> {
         writer.write_all(self.aname.as_bytes())?;
         Ok(())
     }
-}
-
-impl<'a> TMessage<'a> for TAuth<'a> {
-    type RMessage<'b> = RAuth;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -359,10 +347,6 @@ impl<'a> Message<'a> for RAttach {
     }
 }
 
-impl<'a> TMessage<'a> for TAttach<'a> {
-    type RMessage<'b> = RAttach;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TWalk<'a> {
     pub fid: Fid,
@@ -421,10 +405,6 @@ impl<'a> Message<'a> for RWalk<'a> {
     }
 }
 
-impl<'a> TMessage<'a> for TWalk<'a> {
-    type RMessage<'b> = RWalk<'b>;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TOpen {
     pub fid: Fid,
@@ -471,10 +451,6 @@ impl<'a> Message<'a> for ROpen {
     fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
         todo!()
     }
-}
-
-impl<'a> TMessage<'a> for TOpen {
-    type RMessage<'b> = ROpen;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -530,10 +506,6 @@ impl<'a> Message<'a> for RCreate {
     }
 }
 
-impl<'a> TMessage<'a> for TCreate<'a> {
-    type RMessage<'b> = RCreate;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TRead {
     pub fid: Fid,
@@ -586,10 +558,6 @@ impl<'a> Message<'a> for RRead<'a> {
     }
 }
 
-impl<'a> TMessage<'a> for TRead {
-    type RMessage<'b> = RRead<'b>;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TWrite<'a> {
     pub fid: Fid,
@@ -639,10 +607,6 @@ impl<'a> Message<'a> for RWrite {
     }
 }
 
-impl<'a> TMessage<'a> for TWrite<'a> {
-    type RMessage<'b> = RWrite;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TClunk {
     pub fid: Fid,
@@ -663,10 +627,6 @@ impl<'a> Message<'a> for TClunk {
         writer.write_all(&self.fid.0.to_le_bytes())?;
         Ok(())
     }
-}
-
-impl<'a> TMessage<'a> for TClunk {
-    type RMessage<'b> = RClunk;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -700,10 +660,6 @@ impl<'a> Message<'a> for TRemove {
 pub struct RRemove;
 
 impl_empty_message!(RRemove, MessageType::RRemove);
-
-impl<'a> TMessage<'a> for TRemove {
-    type RMessage<'b> = RRemove;
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct TStat {
@@ -749,10 +705,6 @@ impl<'a> Message<'a> for RStat<'a> {
     }
 }
 
-impl<'a> TMessage<'a> for TStat {
-    type RMessage<'b> = RStat<'b>;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct TWStat<'a> {
     pub fid: Fid,
@@ -778,11 +730,32 @@ impl<'a> Message<'a> for TWStat<'a> {
     }
 }
 
-impl<'a> TMessage<'a> for TWStat<'a> {
-    type RMessage<'b> = RWStat;
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct RWStat;
 
 impl_empty_message!(RWStat, MessageType::RWStat);
+
+pub trait TMessage<'a>: Message<'a> {
+    type RMessage<'b>: Message<'b>;
+}
+
+macro_rules! impl_tmessage_rmessage {
+    ($tmsg:ty, $rmsg:ty) => {
+        impl<'a> TMessage<'a> for $tmsg {
+            type RMessage<'b> = $rmsg;
+        }
+    };
+}
+
+impl_tmessage_rmessage!(TVersion<'a>, RVersion<'b>);
+impl_tmessage_rmessage!(TAuth<'a>, RAuth);
+impl_tmessage_rmessage!(TAttach<'a>, RAttach);
+impl_tmessage_rmessage!(TWalk<'a>, RWalk<'b>);
+impl_tmessage_rmessage!(TOpen, ROpen);
+impl_tmessage_rmessage!(TCreate<'a>, RCreate);
+impl_tmessage_rmessage!(TRead, RRead<'b>);
+impl_tmessage_rmessage!(TWrite<'a>, RWrite);
+impl_tmessage_rmessage!(TClunk, RClunk);
+impl_tmessage_rmessage!(TRemove, RRemove);
+impl_tmessage_rmessage!(TStat, RStat<'b>);
+impl_tmessage_rmessage!(TWStat<'a>, RWStat);
