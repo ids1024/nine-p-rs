@@ -47,7 +47,7 @@ impl_field_le_bytes!(u64, 8);
 
 impl<'a> Field<'a> for &'a [u8] {
     fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
-        let (bytes, len) = u16::parse(bytes)?;
+        let (bytes, len) = u32::parse(bytes)?;
         let len = len as usize;
         if bytes.len() < len {
             return Err(Error::MessageLength);
@@ -58,8 +58,12 @@ impl<'a> Field<'a> for &'a [u8] {
 
 impl<'a> Field<'a> for &'a str {
     fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error> {
-        let (bytes, value) = <&[u8]>::parse(bytes)?;
-        Ok((bytes, str::from_utf8(value)?))
+        let (bytes, len) = u16::parse(bytes)?;
+        let len = len as usize;
+        if bytes.len() < len {
+            return Err(Error::MessageLength);
+        }
+        Ok((&bytes[len..], str::from_utf8(&bytes[..len])?))
     }
 }
 
@@ -105,22 +109,65 @@ pub enum MessageType {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Qid([u8; 13]);
-
-unsafe impl bytemuck::Pod for Qid {}
-unsafe impl bytemuck::Zeroable for Qid {}
+pub struct Qid {
+    type_: u8,
+    vers: u32,
+    path: u64,
+}
 
 impl<'a> Field<'a> for Qid {
     fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
-        if bytes.len() < 13 {
-            return Err(Error::MessageLength);
-        }
+        let (bytes, type_) = u8::parse(bytes)?;
+        let (bytes, vers) = u32::parse(bytes)?;
+        let (bytes, path) = u64::parse(bytes)?;
+        Ok((bytes, Qid { type_, vers, path }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Stat<'a> {
+    type_: u16,
+    dev: u32,
+    qid: Qid,
+    mode: u32,
+    atime: u32,
+    mtime: u32,
+    length: u64,
+    name: &'a str,
+    uid: &'a str,
+    gid: &'a str,
+    muid: &'a str,
+}
+
+impl<'a> Field<'a> for Stat<'a> {
+    fn parse(bytes: &'a [u8]) -> Result<(&[u8], Self), Error> {
+        let (bytes, _size) = u16::parse(bytes)?; // TODO
+        let (bytes, type_) = u16::parse(bytes)?;
+        let (bytes, dev) = u32::parse(bytes)?;
+        let (bytes, qid) = Qid::parse(bytes)?;
+        let (bytes, mode) = u32::parse(bytes)?;
+        let (bytes, atime) = u32::parse(bytes)?;
+        let (bytes, mtime) = u32::parse(bytes)?;
+        let (bytes, length) = u64::parse(bytes)?;
+        let (bytes, name) = <&str>::parse(bytes)?;
+        let (bytes, uid) = <&str>::parse(bytes)?;
+        let (bytes, gid) = <&str>::parse(bytes)?;
+        let (bytes, muid) = <&str>::parse(bytes)?;
         Ok((
-            &bytes[13..],
-            Self([
-                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
-            ]),
+            bytes,
+            Stat {
+                type_,
+                dev,
+                qid,
+                mode,
+                atime,
+                mtime,
+                length,
+                name,
+                uid,
+                gid,
+                muid,
+            },
         ))
     }
 }
@@ -373,21 +420,25 @@ impl<'a> Message<'a> for TWalk<'a> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct RWalk<'a> {
-    qids: &'a [Qid],
+pub struct RWalk {
+    qids: Vec<Qid>,
 }
 
-impl<'a> Message<'a> for RWalk<'a> {
+impl<'a> Message<'a> for RWalk {
     const TYPE: MessageType = MessageType::RWalk;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        let (body, len) = u16::parse(body)?;
+        let (mut body, len) = u16::parse(body)?;
         if body.len() != 13 * len as usize {
             return Err(Error::MessageLength);
         }
-        Ok(RWalk {
-            qids: bytemuck::cast_slice(body),
-        })
+        let mut qids = Vec::with_capacity(len as usize);
+        for _ in 0..len {
+            let qid;
+            (body, qid) = Qid::parse(body)?;
+            qids.push(qid);
+        }
+        Ok(RWalk { qids })
     }
 
     fn size(&self) -> usize {
@@ -678,15 +729,16 @@ impl<'a> Message<'a> for TStat {
 
 #[derive(Clone, Debug, Default)]
 pub struct RStat<'a> {
-    pub stat: &'a [u8],
+    pub stat: Stat<'a>,
 }
 
 impl<'a> Message<'a> for RStat<'a> {
     const TYPE: MessageType = MessageType::RStat;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        let (body, stat) = <&[u8]>::parse(body)?;
-        end_of_message(body, RStat { stat })
+        let (body, stat) = Stat::parse(body)?;
+        //end_of_message(body, RStat { stat })
+        Ok(RStat { stat }) // XXX?
     }
 
     fn size(&self) -> usize {
@@ -743,7 +795,7 @@ macro_rules! impl_tmessage_rmessage {
 impl_tmessage_rmessage!(TVersion<'a>, RVersion<'b>);
 impl_tmessage_rmessage!(TAuth<'a>, RAuth);
 impl_tmessage_rmessage!(TAttach<'a>, RAttach);
-impl_tmessage_rmessage!(TWalk<'a>, RWalk<'b>);
+impl_tmessage_rmessage!(TWalk<'a>, RWalk);
 impl_tmessage_rmessage!(TOpen, ROpen);
 impl_tmessage_rmessage!(TCreate<'a>, RCreate);
 impl_tmessage_rmessage!(TRead, RRead<'b>);
