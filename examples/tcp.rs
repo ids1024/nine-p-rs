@@ -58,15 +58,22 @@ fn main() -> Result<(), nine_p::Error> {
     )?;
     println!("{:?}", res);
 
-    let res = client.send(
-        0,
-        nine_p::TRead {
-            fid: Fid(1),
-            offset: 0,
-            count: 4096,
-        },
-    )?;
-    println!("{:?}", res);
+    let mut offset = 0;
+    loop {
+        let res = client.send(
+            0,
+            nine_p::TRead {
+                fid: Fid(1),
+                offset,
+                count: 4096,
+            },
+        )?;
+        println!("{:?}", res);
+        if res.data.len() == 0 {
+            break;
+        }
+        offset += res.data.len() as u64;
+    }
 
     let res = client.send(0, nine_p::TClunk { fid: Fid(1) })?;
     println!("{:?}", res);
