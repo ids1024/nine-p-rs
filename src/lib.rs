@@ -18,6 +18,17 @@ mod sync_client;
 mod tokio_server;
 pub use sync_client::SyncClient;
 
+// XXX
+pub fn parse_dir(mut bytes: &[u8]) -> Result<Vec<Stat<'_>>, Error> {
+    let mut entries = Vec::new();
+    while !bytes.is_empty() {
+        let entry;
+        (bytes, entry) = Stat::parse(bytes)?;
+        entries.push(entry);
+    }
+    Ok(entries)
+}
+
 trait Field<'a>: Sized {
     fn parse(bytes: &'a [u8]) -> Result<(&'a [u8], Self), Error>;
 

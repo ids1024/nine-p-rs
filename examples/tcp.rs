@@ -58,6 +58,7 @@ fn main() -> Result<(), nine_p::Error> {
     )?;
     println!("{:?}", res);
 
+    let mut dir_contents = Vec::new(); // XXX
     let mut offset = 0;
     loop {
         let res = client.send(
@@ -72,8 +73,10 @@ fn main() -> Result<(), nine_p::Error> {
         if res.data.len() == 0 {
             break;
         }
+        dir_contents.extend_from_slice(res.data);
         offset += res.data.len() as u64;
     }
+    println!("{:?}", nine_p::parse_dir(&dir_contents));
 
     let res = client.send(0, nine_p::TClunk { fid: Fid(1) })?;
     println!("{:?}", res);
