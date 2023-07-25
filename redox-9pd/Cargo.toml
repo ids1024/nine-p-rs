@@ -1,0 +1,9 @@
+[package]
+name = "redox-9pd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nine-p = { path = ".." }
+redox-daemon = "0.1.0"
+redox_syscall = "0.3.5"
