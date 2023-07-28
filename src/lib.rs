@@ -126,6 +126,12 @@ pub struct Qid {
     path: u64,
 }
 
+impl Qid {
+    pub fn is_dir(&self) -> bool {
+        self.type_ & 0x80 != 0
+    }
+}
+
 impl<'a> Field<'a> for Qid {
     fn parse(bytes: &[u8]) -> Result<(&[u8], Self), Error> {
         let (bytes, type_) = u8::parse(bytes)?;
