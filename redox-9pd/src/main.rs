@@ -10,12 +10,17 @@ use syscall::{
     SchemeMut,
 };
 
-struct Scheme {
+struct Scheme<'a> {
     client: nine_p::SyncClient<TcpStream>,
+    queue: virtio_core::transport::Queue<'a>,
 }
 
-impl syscall::scheme::SchemeMut for Scheme {
+impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
     fn open(&mut self, _path: &str, flags: usize, uid: u32, _gid: u32) -> syscall::Result<usize> {
+        virtio_core::spec::ChainBuilder::new();
+        let dma = common::dma::Dma::new(0i32).unwrap();
+        virtio_core::spec::Buffer::new(&dma);
+
         let res = self
             .client
             .send(
@@ -52,6 +57,11 @@ fn daemon(daemon: redox_daemon::Daemon) -> ! {
 
     // TODO?
     device.transport.finalize_features();
+
+    let queue = device
+        .transport
+        .setup_queue(virtio_core::MSIX_PRIMARY_VECTOR, &device.irq_handle)
+        .unwrap();
 
     let socket_file = fs::File::create(":9p").unwrap();
 

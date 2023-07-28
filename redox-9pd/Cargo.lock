@@ -435,6 +435,7 @@ dependencies = [
 name = "redox-9pd"
 version = "0.1.0"
 dependencies = [
+ "common",
  "nine-p",
  "pcid",
  "redox-daemon",

@@ -7,5 +7,6 @@ edition = "2021"
 nine-p = { path = ".." }
 redox-daemon = "0.1.0"
 redox_syscall = "0.3.5"
+common = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
 pcid = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
 virtio-core = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
