@@ -10,3 +10,4 @@ redox_syscall = "0.3.5"
 common = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
 pcid = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
 virtio-core = { git = "https://gitlab.redox-os.org/redox-os/drivers" }
+futures-executor = "0.3.28"

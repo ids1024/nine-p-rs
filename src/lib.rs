@@ -12,7 +12,7 @@ use std::{io, str};
 mod error;
 pub use error::Error;
 mod header;
-use header::Header;
+pub use header::Header;
 mod sync_client;
 #[cfg(feature = "tokio")]
 mod tokio_server;
