@@ -3,6 +3,7 @@ use std::{
     fs,
     io::{Read, Write},
     net::TcpStream,
+    sync::Arc,
 };
 use syscall::{
     error::{Error, ENOTDIR},
@@ -12,7 +13,7 @@ use syscall::{
 use virtio_core::spec::{Buffer, ChainBuilder, DescriptorFlags};
 
 struct Scheme<'a> {
-    queue: virtio_core::transport::Queue<'a>,
+    queue: Arc<virtio_core::transport::Queue<'a>>,
     dma: common::dma::Dma<[u8; 4096]>,
     reply_dma: common::dma::Dma<[u8; 4096]>,
 }
@@ -33,12 +34,23 @@ fn parse_reply<'a, Reply: Message<'a>>(
 }
 
 impl<'a> Scheme<'a> {
-    fn new(queue: virtio_core::transport::Queue<'a>) -> Self {
-        Self {
+    fn new(queue: Arc<virtio_core::transport::Queue<'a>>) -> Self {
+        let mut scheme = Self {
             queue,
             dma: common::dma::Dma::new([0; 4096]).unwrap(),
             reply_dma: common::dma::Dma::new([0; 4096]).unwrap(),
-        }
+        };
+        // TODO does msize include header? consider reply.
+        scheme
+            .send(
+                65535,
+                nine_p::TVersion {
+                    msize: 4096,
+                    version: "9P2000",
+                },
+            )
+            .unwrap();
+        scheme
     }
 
     fn send<'b, T: nine_p::TMessage<'b>>(
@@ -104,9 +116,9 @@ fn daemon(daemon: redox_daemon::Daemon) -> ! {
         .setup_queue(virtio_core::MSIX_PRIMARY_VECTOR, &device.irq_handle)
         .unwrap();
 
-    let socket_file = fs::File::create(":9p").unwrap();
+    let mut socket_file = fs::File::create(":9p").unwrap();
 
-    let scheme: Scheme = todo!(); // XXX
+    let mut scheme: Scheme = Scheme::new(queue);
 
     daemon.ready().unwrap();
 
