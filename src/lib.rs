@@ -189,7 +189,7 @@ impl<'a> Field<'a> for Stat<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct Fid(pub u32);
 
 impl<'a> Field<'a> for Fid {
