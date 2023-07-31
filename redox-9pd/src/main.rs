@@ -12,6 +12,8 @@ use syscall::{
 };
 use virtio_core::spec::{Buffer, ChainBuilder, DescriptorFlags};
 
+const VIRTIO_9P_MOUNT_TAG: u32 = 0;
+
 struct Scheme<'a> {
     queue: Arc<virtio_core::transport::Queue<'a>>,
     dma: common::dma::Dma<[u8; 4096]>,
@@ -60,7 +62,7 @@ impl<'a> Scheme<'a> {
     ) -> Result<T::RMessage<'_>, nine_p::Error> {
         let header = nine_p::Header::for_message(&msg, tag);
         header.write(&mut self.dma[..]).unwrap();
-        msg.write(&mut self.dma[..]).unwrap();
+        msg.write(&mut self.dma[7..]).unwrap();
 
         let command = ChainBuilder::new()
             .chain(Buffer::new(&self.dma))
@@ -68,8 +70,8 @@ impl<'a> Scheme<'a> {
             .build();
         futures_executor::block_on(self.queue.send(command));
 
-        let header = Header::from_array(<[u8; 7]>::try_from(&self.reply_dma[..7]).unwrap());
-        parse_reply(&header, &self.reply_dma[7..])
+        let reply_header = Header::from_array(<[u8; 7]>::try_from(&self.reply_dma[..7]).unwrap());
+        parse_reply(&reply_header, &self.reply_dma[7..reply_header.size as usize])
     }
 }
 
@@ -91,7 +93,13 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
         todo!()
     }
 
+    fn close(&mut self, id: usize) -> syscall::Result<usize> {
+        // XXX
+        Ok(0)
+    }
+
     fn read(&mut self, id: usize, buf: &mut [u8]) -> syscall::Result<usize> {
+        // If directory, convert format
         todo!()
     }
 
@@ -108,6 +116,21 @@ fn daemon(daemon: redox_daemon::Daemon) -> ! {
     let device = virtio_core::probe_device(&mut pcid_handle).unwrap();
     let device_space = device.device_space;
 
+    if device.transport.check_device_feature(VIRTIO_9P_MOUNT_TAG) {
+        // XXX
+        unsafe {
+            let tag_len = u16::from_ne_bytes([device_space.read_volatile(), device_space.add(1).read_volatile()]);
+            let mut tag = Vec::new();
+            for i in 2..2+tag_len as usize {
+                tag.push(device_space.add(i).read_volatile());
+            }
+            let tag = String::from_utf8_lossy(&tag);
+            eprintln!("9p tag: {}", tag);
+        }
+
+        device.transport.ack_driver_feature(VIRTIO_9P_MOUNT_TAG);
+    }
+
     // TODO?
     device.transport.finalize_features();
 
@@ -115,6 +138,8 @@ fn daemon(daemon: redox_daemon::Daemon) -> ! {
         .transport
         .setup_queue(virtio_core::MSIX_PRIMARY_VECTOR, &device.irq_handle)
         .unwrap();
+
+    device.transport.run_device();
 
     let mut socket_file = fs::File::create(":9p").unwrap();
 
