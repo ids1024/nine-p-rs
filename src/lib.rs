@@ -143,17 +143,17 @@ impl<'a> Field<'a> for Qid {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stat<'a> {
-    type_: u16,
-    dev: u32,
-    qid: Qid,
-    mode: u32,
-    atime: u32,
-    mtime: u32,
-    length: u64,
-    name: &'a str,
-    uid: &'a str,
-    gid: &'a str,
-    muid: &'a str,
+    pub type_: u16,
+    pub dev: u32,
+    pub qid: Qid,
+    pub mode: u32,
+    pub atime: u32,
+    pub mtime: u32,
+    pub length: u64,
+    pub name: &'a str,
+    pub uid: &'a str,
+    pub gid: &'a str,
+    pub muid: &'a str,
 }
 
 impl<'a> Field<'a> for Stat<'a> {

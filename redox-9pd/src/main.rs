@@ -20,64 +20,16 @@ const ROOT: Fid = Fid(0);
 
 struct File {
     qid: nine_p::Qid,
+    dir_contents: Option<Vec<u8>>,
 }
 
-struct Scheme<'a> {
+struct Transport<'a> {
     queue: Arc<virtio_core::transport::Queue<'a>>,
     dma: common::dma::Dma<[u8; 4096]>,
     reply_dma: common::dma::Dma<[u8; 4096]>,
-    next_id: Fid,
-    files: HashMap<Fid, File>,
 }
 
-fn parse_reply<'a, Reply: Message<'a>>(
-    header: &Header,
-    body: &'a [u8],
-) -> Result<Reply, nine_p::Error> {
-    if header.type_ == Reply::TYPE as u8 {
-        Reply::parse(body)
-    } else if header.type_ == RError::TYPE as u8 {
-        Err(nine_p::Error::Protocol(
-            nine_p::RError::parse(body)?.ename.to_string(),
-        ))
-    } else {
-        Err(nine_p::Error::UnexpectedType(header.type_))
-    }
-}
-
-impl<'a> Scheme<'a> {
-    fn new(queue: Arc<virtio_core::transport::Queue<'a>>) -> Self {
-        let mut scheme = Self {
-            queue,
-            dma: common::dma::Dma::new([0; 4096]).unwrap(),
-            reply_dma: common::dma::Dma::new([0; 4096]).unwrap(),
-            next_id: Fid(1),
-            files: HashMap::new(),
-        };
-        // TODO does msize include header? consider reply.
-        scheme
-            .send(
-                65535,
-                nine_p::TVersion {
-                    msize: 4096,
-                    version: "9P2000",
-                },
-            )
-            .unwrap();
-        let res = scheme
-            .send(
-                0,
-                nine_p::TAttach {
-                    fid: ROOT,
-                    afid: Fid(u32::MAX),
-                    uname: "",
-                    aname: "",
-                },
-            )
-            .unwrap();
-        scheme
-    }
-
+impl<'a> Transport<'a> {
     fn send<'b, T: nine_p::TMessage<'b>>(
         &mut self,
         tag: u16,
@@ -102,19 +54,84 @@ impl<'a> Scheme<'a> {
     }
 }
 
+struct Scheme<'a> {
+    transport: Transport<'a>,
+    next_id: Fid,
+    files: HashMap<Fid, File>,
+}
+
+fn parse_reply<'a, Reply: Message<'a>>(
+    header: &Header,
+    body: &'a [u8],
+) -> Result<Reply, nine_p::Error> {
+    if header.type_ == Reply::TYPE as u8 {
+        Reply::parse(body)
+    } else if header.type_ == RError::TYPE as u8 {
+        Err(nine_p::Error::Protocol(
+            nine_p::RError::parse(body)?.ename.to_string(),
+        ))
+    } else {
+        Err(nine_p::Error::UnexpectedType(header.type_))
+    }
+}
+
+impl<'a> Scheme<'a> {
+    fn new(queue: Arc<virtio_core::transport::Queue<'a>>) -> Self {
+        let mut transport = Transport {
+            queue,
+            dma: common::dma::Dma::new([0; 4096]).unwrap(),
+            reply_dma: common::dma::Dma::new([0; 4096]).unwrap(),
+        };
+
+        // TODO does msize include header? consider reply.
+        transport
+            .send(
+                65535,
+                nine_p::TVersion {
+                    msize: 4096,
+                    version: "9P2000",
+                },
+            )
+            .unwrap();
+        transport
+            .send(
+                0,
+                nine_p::TAttach {
+                    fid: ROOT,
+                    afid: Fid(u32::MAX),
+                    uname: "",
+                    aname: "",
+                },
+            )
+            .unwrap();
+
+        Self {
+            transport,
+            next_id: Fid(1),
+            files: HashMap::new(),
+        }
+    }
+}
+
 impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
     fn open(&mut self, path: &str, flags: usize, uid: u32, _gid: u32) -> syscall::Result<usize> {
+        let mut wnames: Vec<_> = path.split('/').collect();
+        if wnames.is_empty() {
+            wnames.push(".");
+        }
         let res = self
+            .transport
             .send(
                 0,
                 nine_p::TWalk {
                     fid: ROOT,
                     newfid: self.next_id,
-                    wnames: path.split('/').collect(),
+                    wnames,
                 },
             )
             .unwrap();
         let res = self
+            .transport
             .send(
                 0,
                 nine_p::TOpen {
@@ -123,12 +140,19 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                 },
             )
             .unwrap(); // XXX error?
-        self.files.insert(self.next_id, File {
-            qid: res.qid
-        });
+        self.files.insert(
+            self.next_id,
+            File {
+                qid: res.qid,
+                dir_contents: None,
+            },
+        );
+        let id = self.next_id.0 as usize;
         self.next_id.0 += 1;
+        return Ok(id);
         let is_dir = res.qid.is_dir();
         if flags & O_DIRECTORY == O_DIRECTORY && !is_dir {
+            // XXX close
             return Err(Error::new(ENOTDIR));
         } else if flags & O_DIRECTORY != O_DIRECTORY && is_dir {
             return Err(Error::new(EISDIR));
@@ -145,6 +169,38 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
         // If directory, convert format
         if let Some(file) = self.files.get_mut(&Fid(id as u32)) {
             if file.qid.is_dir() {
+                if file.dir_contents.is_none() {
+                    let mut dir_contents = Vec::new(); // XXX
+                    let mut offset = 0;
+                    loop {
+                        let res = self
+                            .transport
+                            .send(
+                                0,
+                                nine_p::TRead {
+                                    fid: Fid(1),
+                                    offset,
+                                    count: 4096,
+                                },
+                            )
+                            .unwrap(); // XXX
+                        if res.data.len() == 0 {
+                            break;
+                        }
+                        dir_contents.extend_from_slice(res.data);
+                        offset += res.data.len() as u64;
+                    }
+
+                    // Convert
+                    let stats = nine_p::parse_dir(&dir_contents).unwrap(); // XXX
+                    let mut dir_contents = Vec::new();
+                    for i in stats {
+                        dir_contents.extend_from_slice(i.name.as_bytes());
+                        dir_contents.push(b'\n');
+                    }
+                    file.dir_contents = Some(dir_contents);
+                }
+
                 todo!()
             } else {
                 todo!()
