@@ -35,7 +35,6 @@ impl<'a> Transport<'a> {
         tag: u16,
         msg: T,
     ) -> Result<T::RMessage<'_>, nine_p::Error> {
-        println!("A0"); // XXX load bearing?
         let header = nine_p::Header::for_message(&msg, tag);
         header.write(&mut self.dma[..]).unwrap();
         msg.write(&mut self.dma[7..]).unwrap();
@@ -82,6 +81,8 @@ impl<'a> Scheme<'a> {
             dma: common::dma::Dma::new([0; 4096]).unwrap(),
             reply_dma: common::dma::Dma::new([0; 4096]).unwrap(),
         };
+
+        std::thread::yield_now(); // Why is this needed XXX?
 
         // TODO does msize include header? consider reply.
         transport
