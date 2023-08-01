@@ -8,7 +8,7 @@ use std::{
 };
 use syscall::{
     error::{Error, EBADFD, EISDIR, ENOTDIR},
-    flag::{O_DIRECTORY, O_WRONLY},
+    flag::{O_DIRECTORY, O_RDONLY, O_RDWR, O_WRONLY},
     SchemeMut,
 };
 use virtio_core::spec::{Buffer, ChainBuilder, DescriptorFlags};
@@ -21,6 +21,7 @@ const ROOT: Fid = Fid(0);
 struct File {
     qid: nine_p::Qid,
     dir_contents: Option<Vec<u8>>,
+    offset: u64,
 }
 
 struct Transport<'a> {
@@ -146,6 +147,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
             File {
                 qid: res.qid,
                 dir_contents: None,
+                offset: 0,
             },
         );
         let id = self.next_id.0 as usize;
@@ -155,7 +157,10 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
         if flags & O_DIRECTORY == O_DIRECTORY && !is_dir {
             // XXX close
             return Err(Error::new(ENOTDIR));
-        } else if flags & O_DIRECTORY != O_DIRECTORY && is_dir {
+        } else if flags & O_DIRECTORY != O_DIRECTORY
+            && is_dir
+            && (flags & O_WRONLY == O_WRONLY && flags & O_RDWR == O_RDWR)
+        {
             return Err(Error::new(EISDIR));
         } // else if flags & O_WRONLY == O_WRONLY {
         todo!()
@@ -168,7 +173,8 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
 
     fn read(&mut self, id: usize, buf: &mut [u8]) -> syscall::Result<usize> {
         // If directory, convert format
-        if let Some(file) = self.files.get_mut(&Fid(id as u32)) {
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
             if file.qid.is_dir() {
                 if file.dir_contents.is_none() {
                     let mut dir_contents = Vec::new(); // XXX
@@ -179,9 +185,9 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                             .send(
                                 0,
                                 nine_p::TRead {
-                                    fid: Fid(1),
+                                    fid,
                                     offset,
-                                    count: 4096,
+                                    count: 4096 - 7,
                                 },
                             )
                             .unwrap(); // XXX
@@ -204,7 +210,20 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
 
                 todo!()
             } else {
-                todo!()
+                let res = self
+                    .transport
+                    .send(
+                        0,
+                        nine_p::TRead {
+                            fid,
+                            offset: file.offset,
+                            count: (buf.len() as u32).min(4096 - 7 - 4),
+                        },
+                    )
+                    .unwrap(); // XXX
+                buf[0..res.data.len()].copy_from_slice(res.data);
+                file.offset += res.data.len() as u64;
+                Ok(res.data.len())
             }
         } else {
             Err(Error::new(EBADFD))
@@ -213,6 +232,27 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
 
     fn write(&mut self, id: usize, buffer: &[u8]) -> syscall::Result<usize> {
         todo!()
+    }
+
+    // TODO
+    fn fstat(&mut self, id: usize, stat: &mut syscall::Stat) -> syscall::Result<usize> {
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
+            let type_ = if file.qid.is_dir() {
+                syscall::flag::MODE_DIR
+            } else {
+                syscall::flag::MODE_FILE
+            };
+            let res = self.transport.send(0, nine_p::TStat { fid }).unwrap();
+            *stat = syscall::data::Stat {
+                st_mode: type_,
+                st_size: res.stat.length,
+                ..Default::default()
+            };
+            Ok(0)
+        } else {
+            Err(Error::new(EBADFD))
+        }
     }
 }
 
