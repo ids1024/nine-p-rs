@@ -118,10 +118,8 @@ impl<'a> Scheme<'a> {
 
 impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
     fn open(&mut self, path: &str, flags: usize, uid: u32, _gid: u32) -> syscall::Result<usize> {
-        let mut wnames: Vec<_> = path.split('/').collect();
-        if wnames.is_empty() {
-            wnames.push(".");
-        }
+        // XXX better path processing?
+        let wnames = path.split('/').filter(|x| !x.is_empty()).collect();
         let res = self
             .transport
             .send(
@@ -170,7 +168,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
 
     fn close(&mut self, id: usize) -> syscall::Result<usize> {
         let fid = Fid(id as u32);
-        if let Some(file) = self.files.get_mut(&fid) {
+        if let Some(file) = self.files.remove(&fid) {
             self.transport.send(0, nine_p::TClunk { fid }).unwrap();
             Ok(0)
         } else {
