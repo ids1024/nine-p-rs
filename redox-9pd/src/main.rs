@@ -3,12 +3,11 @@ use std::{
     collections::HashMap,
     fs,
     io::{Read, Write},
-    net::TcpStream,
     sync::Arc,
 };
 use syscall::{
     error::{Error, EBADFD, EISDIR, ENOTDIR},
-    flag::{O_DIRECTORY, O_RDONLY, O_RDWR, O_WRONLY},
+    flag::{O_DIRECTORY, O_RDWR, O_WRONLY},
     SchemeMut,
 };
 use virtio_core::spec::{Buffer, ChainBuilder, DescriptorFlags};
@@ -18,6 +17,10 @@ const VIRTIO_9P_MOUNT_TAG: u32 = 0;
 // XXX attach seperately per user? What does linux driver do?
 const ROOT: Fid = Fid(0);
 
+// XXX Configurable? Default?
+// https://wiki.qemu.org/Documentation/9psetup#msize
+const MSIZE: usize = 128 * 1024;
+
 struct File {
     qid: nine_p::Qid,
     dir_contents: Option<Vec<u8>>,
@@ -26,8 +29,8 @@ struct File {
 
 struct Transport<'a> {
     queue: Arc<virtio_core::transport::Queue<'a>>,
-    dma: common::dma::Dma<[u8; 4096]>,
-    reply_dma: common::dma::Dma<[u8; 4096]>,
+    dma: common::dma::Dma<[u8; MSIZE]>,
+    reply_dma: common::dma::Dma<[u8; MSIZE]>,
 }
 
 impl<'a> Transport<'a> {
@@ -80,8 +83,8 @@ impl<'a> Scheme<'a> {
     fn new(queue: Arc<virtio_core::transport::Queue<'a>>) -> Self {
         let mut transport = Transport {
             queue,
-            dma: common::dma::Dma::new([0; 4096]).unwrap(),
-            reply_dma: common::dma::Dma::new([0; 4096]).unwrap(),
+            dma: common::dma::Dma::new([0; MSIZE]).unwrap(),
+            reply_dma: common::dma::Dma::new([0; MSIZE]).unwrap(),
         };
 
         std::thread::yield_now(); // Why is this needed XXX?
@@ -91,7 +94,7 @@ impl<'a> Scheme<'a> {
             .send(
                 65535,
                 nine_p::TVersion {
-                    msize: 4096,
+                    msize: MSIZE as u32,
                     version: "9P2000.u",
                 },
             )
@@ -202,7 +205,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                                 nine_p::TRead {
                                     fid,
                                     offset,
-                                    count: 4096 - 7 - 4,
+                                    count: MSIZE as u32 - 7 - 4,
                                 },
                             )
                             .unwrap(); // XXX
@@ -236,7 +239,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                         nine_p::TRead {
                             fid,
                             offset: file.offset,
-                            count: (buf.len() as u32).min(4096 - 7 - 4),
+                            count: (buf.len() as u32).min(MSIZE as u32 - 7 - 4),
                         },
                     )
                     .unwrap(); // XXX
@@ -265,7 +268,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
     fn fstatvfs(&mut self, id: usize, stat: &mut syscall::StatVfs) -> syscall::Result<usize> {
         let fid = Fid(id as u32);
         if let Some(_file) = self.files.get_mut(&fid) {
-            stat.f_bsize = 4096 - 7 - 4;
+            stat.f_bsize = 4096;
             stat.f_blocks = 0;
             stat.f_bfree = 0;
             stat.f_bavail = 0;
