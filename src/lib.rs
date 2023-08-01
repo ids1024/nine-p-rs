@@ -1,4 +1,7 @@
+#![feature(backtrace_frames)]
+
 // http://man.cat-v.org/plan_9/5/intro
+// http://ericvh.github.io/9p-rfc/rfc9p2000.u.html
 
 // TODO: no-copy parsing from virtio ring buffer?
 // - even if we copy soon after, want to avoid copying twice. at least.
@@ -154,11 +157,18 @@ pub struct Stat<'a> {
     pub uid: &'a str,
     pub gid: &'a str,
     pub muid: &'a str,
+    /* 9p2000.u
+    extension: &'a str,
+    n_uid: u32,
+    n_gid: u32,
+    n_muid: u32,
+    */
 }
 
 impl<'a> Field<'a> for Stat<'a> {
     fn parse(bytes: &'a [u8]) -> Result<(&[u8], Self), Error> {
-        let (bytes, _size) = u16::parse(bytes)?; // TODO
+        let (bytes, size) = u16::parse(bytes)?; // TODO
+        let rest = &bytes[size as usize..];
         let (bytes, type_) = u16::parse(bytes)?;
         let (bytes, dev) = u32::parse(bytes)?;
         let (bytes, qid) = Qid::parse(bytes)?;
@@ -171,7 +181,7 @@ impl<'a> Field<'a> for Stat<'a> {
         let (bytes, gid) = <&str>::parse(bytes)?;
         let (bytes, muid) = <&str>::parse(bytes)?;
         Ok((
-            bytes,
+            rest,
             Stat {
                 type_,
                 dev,

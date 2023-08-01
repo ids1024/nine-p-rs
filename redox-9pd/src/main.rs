@@ -44,6 +44,7 @@ impl<'a> Transport<'a> {
             .chain(Buffer::new(&self.dma))
             .chain(Buffer::new(&self.reply_dma).flags(DescriptorFlags::WRITE_ONLY))
             .build();
+        // XXX return value?
         futures_executor::block_on(self.queue.send(command));
 
         let reply_header = Header::from_array(<[u8; 7]>::try_from(&self.reply_dma[..7]).unwrap());
@@ -91,7 +92,7 @@ impl<'a> Scheme<'a> {
                 65535,
                 nine_p::TVersion {
                     msize: 4096,
-                    version: "9P2000",
+                    version: "9P2000.u",
                 },
             )
             .unwrap();
@@ -152,23 +153,39 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
         );
         let id = self.next_id.0 as usize;
         self.next_id.0 += 1;
-        return Ok(id);
+
         let is_dir = res.qid.is_dir();
         if flags & O_DIRECTORY == O_DIRECTORY && !is_dir {
             // XXX close
-            return Err(Error::new(ENOTDIR));
+            Err(Error::new(ENOTDIR))
         } else if flags & O_DIRECTORY != O_DIRECTORY
             && is_dir
             && (flags & O_WRONLY == O_WRONLY && flags & O_RDWR == O_RDWR)
         {
-            return Err(Error::new(EISDIR));
-        } // else if flags & O_WRONLY == O_WRONLY {
-        todo!()
+            Err(Error::new(EISDIR))
+        } else {
+            Ok(id)
+        }
     }
 
     fn close(&mut self, id: usize) -> syscall::Result<usize> {
-        // XXX
-        Ok(0)
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
+            self.transport.send(0, nine_p::TClunk { fid }).unwrap();
+            Ok(0)
+        } else {
+            Err(Error::new(EBADFD))
+        }
+    }
+
+    fn fsync(&mut self, id: usize) -> syscall::Result<usize> {
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
+            // Nothing to do?
+            Ok(0)
+        } else {
+            Err(Error::new(EBADFD))
+        }
     }
 
     fn read(&mut self, id: usize, buf: &mut [u8]) -> syscall::Result<usize> {
@@ -187,7 +204,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                                 nine_p::TRead {
                                     fid,
                                     offset,
-                                    count: 4096 - 7,
+                                    count: 4096 - 7 - 4,
                                 },
                             )
                             .unwrap(); // XXX
@@ -208,7 +225,11 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                     file.dir_contents = Some(dir_contents);
                 }
 
-                todo!()
+                let slice = &file.dir_contents.as_deref().unwrap()[file.offset as usize..];
+                let len = slice.len().min(buf.len());
+                buf[..len].copy_from_slice(&slice[..len]);
+                file.offset += len as u64;
+                Ok(len)
             } else {
                 let res = self
                     .transport
@@ -221,7 +242,7 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
                         },
                     )
                     .unwrap(); // XXX
-                buf[0..res.data.len()].copy_from_slice(res.data);
+                buf[..res.data.len()].copy_from_slice(res.data);
                 file.offset += res.data.len() as u64;
                 Ok(res.data.len())
             }
@@ -232,6 +253,29 @@ impl<'a> syscall::scheme::SchemeMut for Scheme<'a> {
 
     fn write(&mut self, id: usize, buffer: &[u8]) -> syscall::Result<usize> {
         todo!()
+    }
+
+    fn seek(&mut self, id: usize, pos: isize, whence: usize) -> syscall::Result<isize> {
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
+            Ok(0) // XXX
+        } else {
+            Err(Error::new(EBADFD))
+        }
+    }
+
+    fn fstatvfs(&mut self, id: usize, stat: &mut syscall::StatVfs) -> syscall::Result<usize> {
+        let fid = Fid(id as u32);
+        if let Some(_file) = self.files.get_mut(&fid) {
+            stat.f_bsize = 4096 - 7 - 4;
+            stat.f_blocks = 0;
+            stat.f_bfree = 0;
+            stat.f_bavail = 0;
+
+            Ok(0)
+        } else {
+            Err(Error::new(EBADFD))
+        }
     }
 
     // TODO
