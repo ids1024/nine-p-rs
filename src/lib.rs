@@ -350,7 +350,12 @@ impl<'a> Message<'a> for RError<'a> {
     const TYPE: MessageType = MessageType::RError;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
-        let (body, ename) = <&str>::parse(body)?;
+        let (mut body, ename) = <&str>::parse(body)?;
+        // XXX 9p2000.u
+        if body.len() == 4 {
+            let _errno;
+            (body, _errno) = u32::parse(body)?;
+        }
         end_of_message(body, RError { ename })
     }
 
