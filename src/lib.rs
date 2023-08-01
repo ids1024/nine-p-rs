@@ -296,6 +296,9 @@ pub struct TAuth<'a> {
     pub afid: Fid,
     pub uname: &'a str,
     pub aname: &'a str,
+    /* TODO 9p2000.u
+    u_uname: u32,
+    */
 }
 
 impl<'a> Message<'a> for TAuth<'a> {
@@ -374,6 +377,9 @@ pub struct TAttach<'a> {
     pub afid: Fid,
     pub uname: &'a str,
     pub aname: &'a str,
+    /* TODO 9p2000.u
+    u_uname: u32,
+    */
 }
 
 impl<'a> Message<'a> for TAttach<'a> {
@@ -536,6 +542,9 @@ pub struct TCreate<'a> {
     pub name: &'a str,
     pub perm: u32,
     pub mode: u8,
+    /* TODO 9p2000.u
+    extension: &'a str,
+    */
 }
 
 impl<'a> Message<'a> for TCreate<'a> {
