@@ -1,5 +1,3 @@
-#![feature(backtrace_frames)]
-
 // http://man.cat-v.org/plan_9/5/intro
 // http://ericvh.github.io/9p-rfc/rfc9p2000.u.html
 

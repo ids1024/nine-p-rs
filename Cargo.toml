@@ -5,5 +5,4 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bytemuck = "1.13.1"
 tokio = { version = "1.29.1", features = ["io-util", "net", "rt", "sync"], optional = true }
