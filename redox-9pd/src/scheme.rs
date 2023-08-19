@@ -1,8 +1,8 @@
 use nine_p::Fid;
 use std::{collections::HashMap, sync::Arc};
 use syscall::{
-    error::{Error, EBADFD, EISDIR, ENOTDIR},
-    flag::{O_DIRECTORY, O_RDWR, O_WRONLY},
+    error::{Error, EBADFD, EINVAL, EISDIR, ENOTDIR},
+    flag::{self, O_DIRECTORY, O_RDONLY, O_RDWR, O_WRONLY},
     SchemeMut,
 };
 
@@ -15,6 +15,8 @@ struct File {
     qid: nine_p::Qid,
     dir_contents: Option<Vec<u8>>,
     offset: u64,
+    readable: bool,
+    writeable: bool,
 }
 
 pub struct Scheme<'a> {
@@ -84,12 +86,17 @@ impl<'a> SchemeMut for Scheme<'a> {
                 },
             )
             .unwrap(); // XXX error?
+
+        let readable = flags & O_RDONLY == O_RDONLY || flags & O_RDWR == O_RDWR;
+        let writeable = flags & O_WRONLY == O_WRONLY || flags & O_RDWR == O_RDWR;
         self.files.insert(
             self.next_id,
             File {
                 qid: res.qid,
                 dir_contents: None,
                 offset: 0,
+                readable,
+                writeable,
             },
         );
         let id = self.next_id.0 as usize;
@@ -99,10 +106,7 @@ impl<'a> SchemeMut for Scheme<'a> {
         if flags & O_DIRECTORY == O_DIRECTORY && !is_dir {
             // XXX close
             Err(Error::new(ENOTDIR))
-        } else if flags & O_DIRECTORY != O_DIRECTORY
-            && is_dir
-            && (flags & O_WRONLY == O_WRONLY && flags & O_RDWR == O_RDWR)
-        {
+        } else if flags & O_DIRECTORY != O_DIRECTORY && is_dir && writeable {
             Err(Error::new(EISDIR))
         } else {
             Ok(id)
@@ -133,6 +137,9 @@ impl<'a> SchemeMut for Scheme<'a> {
         // If directory, convert format
         let fid = Fid(id as u32);
         if let Some(file) = self.files.get_mut(&fid) {
+            if !file.readable || file.qid.is_dir() {
+                //return Err(Error::new(EINVAL));
+            }
             if file.qid.is_dir() {
                 if file.dir_contents.is_none() {
                     let mut dir_contents = Vec::new(); // XXX
@@ -193,13 +200,36 @@ impl<'a> SchemeMut for Scheme<'a> {
     }
 
     fn write(&mut self, id: usize, buffer: &[u8]) -> syscall::Result<usize> {
-        todo!()
+        let fid = Fid(id as u32);
+        if let Some(file) = self.files.get_mut(&fid) {
+            if !file.writeable {
+                return Err(Error::new(EINVAL));
+            }
+            todo!()
+        } else {
+            Err(Error::new(EBADFD))
+        }
     }
 
     fn seek(&mut self, id: usize, pos: isize, whence: usize) -> syscall::Result<isize> {
         let fid = Fid(id as u32);
         if let Some(file) = self.files.get_mut(&fid) {
-            Ok(0) // XXX
+            match whence {
+                // XXX range?
+                flag::SEEK_SET => {
+                    file.offset = pos as u64;
+                }
+                flag::SEEK_CUR => {
+                    file.offset = (file.offset as isize + pos) as u64;
+                }
+                flag::SEEK_END => {
+                    // TODO
+                }
+                _ => {
+                    return Err(Error::new(EINVAL));
+                }
+            }
+            Ok(file.offset as isize) // XXX
         } else {
             Err(Error::new(EBADFD))
         }
@@ -224,9 +254,9 @@ impl<'a> SchemeMut for Scheme<'a> {
         let fid = Fid(id as u32);
         if let Some(file) = self.files.get_mut(&fid) {
             let type_ = if file.qid.is_dir() {
-                syscall::flag::MODE_DIR
+                flag::MODE_DIR
             } else {
-                syscall::flag::MODE_FILE
+                flag::MODE_FILE
             };
             let res = self.transport.send(0, nine_p::TStat { fid }).unwrap();
             *stat = syscall::data::Stat {
