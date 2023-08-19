@@ -1,0 +1,7 @@
+[[drivers]]
+name = "virtio-9p"
+class = 0 # Should be 2 (net)?
+vendor = 6900
+device = 4105
+command = ["redox-9pd"]
+use_channel = true
