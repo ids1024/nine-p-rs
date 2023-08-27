@@ -122,9 +122,9 @@ pub enum MessageType {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Qid {
-    type_: u8,
-    vers: u32,
-    path: u64,
+    pub type_: u8,
+    pub vers: u32,
+    pub path: u64,
 }
 
 impl Qid {
@@ -457,7 +457,7 @@ impl<'a> Message<'a> for TWalk<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct RWalk {
-    qids: Vec<Qid>,
+    pub qids: Vec<Qid>,
 }
 
 impl<'a> Message<'a> for RWalk {
