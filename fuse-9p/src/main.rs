@@ -16,7 +16,7 @@ use std::{
 
 const TTL: Duration = Duration::from_secs(1);
 
-// Attr for inode?
+// An Inode is added by `lookup`, and at start for root node
 struct Inode {
     // `path` of qid should match inode number
     qid: Qid,
@@ -145,7 +145,10 @@ impl fuser::Filesystem for FS {
         }
 
         let stat = self.client.send(0, nine_p::TStat { fid }).unwrap().stat;
-        let attr = attr_from_stat(&stat);
+        let mut attr = attr_from_stat(&stat);
+
+        // XXX ?
+        attr.ino = ino;
 
         reply.entry(&TTL, &attr, 0); // XXX generation?
     }
@@ -244,13 +247,26 @@ impl fuser::Filesystem for FS {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        self.open_files.remove(&fh);
+        if let Some(open_file) = self.open_files.remove(&fh) {
+            let res = self
+                .client
+                .send(0, nine_p::TClunk { fid: open_file.fid })
+                .unwrap();
+        }
         reply.ok();
     }
 
     fn forget(&mut self, _req: &Request<'_>, ino: u64, nlookup: u64) {
         if let Some(inode) = self.inode_mut(ino) {
             inode.lookups -= nlookup;
+            if inode.lookups == 0 {
+                let fid = inode.fid;
+                let res = self
+                    .client
+                    .send(0, nine_p::TClunk { fid })
+                    .unwrap();
+                self.inodes.remove(&ino);
+            }
         }
     }
 
