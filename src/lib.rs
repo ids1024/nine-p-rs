@@ -775,6 +775,7 @@ impl<'a> Message<'a> for RStat<'a> {
     const TYPE: MessageType = MessageType::RStat;
 
     fn parse(body: &'a [u8]) -> Result<Self, Error> {
+        let (body, _len) = u16::parse(body)?;
         let (body, stat) = Stat::parse(body)?;
         //end_of_message(body, RStat { stat })
         Ok(RStat { stat }) // XXX?

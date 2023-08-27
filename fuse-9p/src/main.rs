@@ -24,8 +24,7 @@ struct Inode {
     lookups: u64,
 }
 
-fn file_type(type_: u16) -> FileType {
-    return FileType::Directory;
+fn file_type(type_: u8) -> FileType {
     if type_ & 0x80 != 0 {
         FileType::Directory
     } else {
@@ -42,7 +41,7 @@ fn attr_from_stat(stat: &nine_p::Stat) -> FileAttr {
         mtime: UNIX_EPOCH + Duration::from_secs(stat.mtime as u64),
         ctime: UNIX_EPOCH,
         crtime: UNIX_EPOCH,
-        kind: file_type(stat.type_),
+        kind: file_type(stat.qid.type_),
         perm: 0o755,
         // TODO use .u extension, if available
         nlink: 1,
@@ -147,9 +146,6 @@ impl fuser::Filesystem for FS {
         let stat = self.client.send(0, nine_p::TStat { fid }).unwrap().stat;
         let mut attr = attr_from_stat(&stat);
 
-        // XXX ?
-        attr.ino = ino;
-
         reply.entry(&TTL, &attr, 0); // XXX generation?
     }
 
@@ -215,7 +211,7 @@ impl fuser::Filesystem for FS {
                 .iter()
                 .map(|stat| DirEntry {
                     ino: stat.qid.path,
-                    kind: file_type(stat.type_),
+                    kind: file_type(stat.qid.type_),
                     name: stat.name.to_string(),
                 })
                 .collect();
@@ -280,9 +276,6 @@ impl fuser::Filesystem for FS {
                 .stat;
             dbg!(stat);
             let mut attr = attr_from_stat(&stat);
-            attr.ino = ino;
-            dbg!(attr);
-            println!("attr");
 
             reply.attr(&TTL, &attr);
         } else {
