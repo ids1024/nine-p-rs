@@ -62,6 +62,7 @@ struct DirEntry {
 
 struct OpenFile {
     dir_entries: Vec<DirEntry>,
+    fid: Fid,
 }
 
 struct FS {
@@ -156,10 +157,34 @@ impl fuser::Filesystem for FS {
     }
 
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: ReplyOpen) {
-        // TODO: TOpen
         println!("opendir");
         if let Some(inode) = self.inode(ino) {
             let fid = inode.fid;
+
+            let newfid = self.next_id;
+            let res = self
+                .client
+                .send(
+                    0,
+                    nine_p::TWalk {
+                        fid,
+                        newfid,
+                        wnames: vec![],
+                    },
+                )
+                .unwrap();
+            self.next_id.0 += 1;
+
+            let res = self
+                .client
+                .send(
+                    0,
+                    nine_p::TOpen {
+                        fid: newfid,
+                        mode: 0, // XXX
+                    },
+                )
+                .unwrap(); // XXX
 
             let mut dir_contents = Vec::new(); // XXX
             let mut offset = 0;
@@ -169,7 +194,7 @@ impl fuser::Filesystem for FS {
                     .send(
                         0,
                         nine_p::TRead {
-                            fid,
+                            fid: newfid,
                             offset,
                             count: 4096,
                         },
@@ -195,7 +220,13 @@ impl fuser::Filesystem for FS {
             let fh = self.next_fh;
             self.next_fh += 1;
 
-            self.open_files.insert(fh, OpenFile { dir_entries });
+            self.open_files.insert(
+                fh,
+                OpenFile {
+                    dir_entries,
+                    fid: newfid,
+                },
+            );
 
             reply.opened(fh, 0);
         } else {
