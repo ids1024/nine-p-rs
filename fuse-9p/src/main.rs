@@ -1,4 +1,5 @@
 // Uses Qid path as ino
+// XXX error handling?
 
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
@@ -149,10 +150,54 @@ impl fuser::Filesystem for FS {
         reply.entry(&TTL, &attr, 0); // XXX generation?
     }
 
-    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        // TODO: TOpen
+    fn open(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: ReplyOpen) {
         println!("open");
-        reply.opened(0, 0);
+
+        // TODO flags
+
+        if let Some(inode) = self.inode(ino) {
+            let fid = inode.fid;
+
+            let newfid = self.next_id;
+            let res = self
+                .client
+                .send(
+                    0,
+                    nine_p::TWalk {
+                        fid,
+                        newfid,
+                        wnames: vec![],
+                    },
+                )
+                .unwrap();
+            self.next_id.0 += 1;
+
+            let res = self
+                .client
+                .send(
+                    0,
+                    nine_p::TOpen {
+                        fid: newfid,
+                        mode: 0, // XXX
+                    },
+                )
+                .unwrap(); // XXX
+
+            let fh = self.next_fh;
+            self.next_fh += 1;
+
+            self.open_files.insert(
+                fh,
+                OpenFile {
+                    dir_entries: vec![],
+                    fid: newfid,
+                },
+            );
+
+            reply.opened(fh, 0);
+        } else {
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: ReplyOpen) {
@@ -252,15 +297,29 @@ impl fuser::Filesystem for FS {
         reply.ok();
     }
 
+    fn releasedir(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        fh: u64,
+        _flags: i32,
+        reply: ReplyEmpty,
+    ) {
+        if let Some(open_file) = self.open_files.remove(&fh) {
+            let res = self
+                .client
+                .send(0, nine_p::TClunk { fid: open_file.fid })
+                .unwrap();
+        }
+        reply.ok();
+    }
+
     fn forget(&mut self, _req: &Request<'_>, ino: u64, nlookup: u64) {
         if let Some(inode) = self.inode_mut(ino) {
             inode.lookups -= nlookup;
             if inode.lookups == 0 {
                 let fid = inode.fid;
-                let res = self
-                    .client
-                    .send(0, nine_p::TClunk { fid })
-                    .unwrap();
+                let res = self.client.send(0, nine_p::TClunk { fid }).unwrap();
                 self.inodes.remove(&ino);
             }
         }
@@ -288,14 +347,33 @@ impl fuser::Filesystem for FS {
         &mut self,
         _req: &Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
-        _size: u32,
+        size: u32,
         _flags: i32,
         _lock: Option<u64>,
         reply: ReplyData,
     ) {
         eprintln!("read");
+
+        if let Some(open_file) = self.open_files.get(&fh) {
+            let fid = open_file.fid;
+
+            let res = self
+                .client
+                .send(
+                    0,
+                    nine_p::TRead {
+                        fid,
+                        offset: offset as u64,
+                        count: size, // XXX limit to msize?
+                    },
+                )
+                .unwrap();
+            reply.data(res.data);
+        } else {
+            reply.error(libc::ENOENT);
+        }
     }
 
     fn readdir(
@@ -317,6 +395,18 @@ impl fuser::Filesystem for FS {
             reply.error(libc::ENOENT);
         }
     }
+
+    // statfs
+    // write
+    // unlink
+    // setattr
+    // rmdir
+    // rename
+    // (symlinks?)
+    // readdirplus
+    // mkdir
+    // lseek
+    // copy_file_range? fallocate? fsync?
 }
 
 fn main() {
