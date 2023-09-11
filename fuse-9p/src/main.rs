@@ -16,6 +16,7 @@ use std::{
 };
 
 const TTL: Duration = Duration::from_secs(1);
+const IOHDRSZ: u32 = 24;
 
 // An Inode is added by `lookup`, and at start for root node
 struct Inode {
@@ -72,6 +73,7 @@ struct FS {
     inodes: HashMap<u64, Inode>,
     open_files: HashMap<u64, OpenFile>,
     root_ino: u64,
+    msize: u32,
 }
 
 impl FS {
@@ -240,7 +242,7 @@ impl fuser::Filesystem for FS {
                         nine_p::TRead {
                             fid: newfid,
                             offset,
-                            count: 4096,
+                            count: self.msize - IOHDRSZ,
                         },
                     )
                     .unwrap(); // XXX
@@ -359,18 +361,26 @@ impl fuser::Filesystem for FS {
         if let Some(open_file) = self.open_files.get(&fh) {
             let fid = open_file.fid;
 
-            let res = self
-                .client
-                .send(
-                    0,
-                    nine_p::TRead {
-                        fid,
-                        offset: offset as u64,
-                        count: size, // XXX limit to msize?
-                    },
-                )
-                .unwrap();
-            reply.data(res.data);
+            let mut buf = Vec::new();
+            loop {
+                let count = (size - buf.len() as u32).min(self.msize - IOHDRSZ);
+                let res = self
+                    .client
+                    .send(
+                        0,
+                        nine_p::TRead {
+                            fid,
+                            offset: offset as u64,
+                            count,
+                        },
+                    )
+                    .unwrap();
+                buf.extend_from_slice(res.data);
+                if res.data.is_empty() || buf.len() as u32 >= size {
+                    break;
+                }
+            }
+            reply.data(&buf);
         } else {
             reply.error(libc::ENOENT);
         }
@@ -417,11 +427,12 @@ fn main() {
         .send(
             65535,
             nine_p::TVersion {
-                msize: 8192,
+                msize: 8192 + IOHDRSZ,
                 version: "9P2000.u",
             },
         )
         .unwrap();
+    let msize = res.msize;
     println!("{:?}", res);
 
     let res = client
@@ -453,6 +464,7 @@ fn main() {
         inodes,
         open_files: HashMap::new(),
         root_ino: res.qid.path,
+        msize,
     };
     fuser::mount2(fs, "mnt", &[]).unwrap();
 }
