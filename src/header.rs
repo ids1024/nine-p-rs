@@ -1,6 +1,4 @@
-use std::io;
-
-use crate::Message;
+use crate::{Message, Writer};
 
 pub struct Header {
     pub size: u32,
@@ -28,10 +26,10 @@ impl Header {
     }
 
     #[inline]
-    pub fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.size.to_le_bytes())?;
-        writer.write_all(&[self.type_])?;
-        writer.write_all(&self.tag.to_le_bytes())?;
+    pub fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.size.to_le_bytes())?;
+        writer.write(&[self.type_])?;
+        writer.write(&self.tag.to_le_bytes())?;
         Ok(())
     }
 

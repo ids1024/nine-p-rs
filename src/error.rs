@@ -1,8 +1,11 @@
-use std::{fmt, io, str};
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+use core::{fmt, str};
 
 #[derive(Debug)]
 pub enum Error {
-    Io(io::Error),
+    #[cfg(feature = "std")]
+    Io(std::io::Error),
     Utf8(str::Utf8Error),
     MessageLength,
     UnrecognizedTag(u16),
@@ -16,10 +19,12 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
+#[cfg(feature = "std")]
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
         Self::Io(error)
     }
 }

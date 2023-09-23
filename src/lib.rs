@@ -8,16 +8,24 @@
 // Many messages are fixed size. Things like Walk should be relatively small. Read/Write may be
 // huge.
 
-use std::{io, str};
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::str;
 
 mod error;
 pub use error::Error;
 mod header;
 pub use header::Header;
+#[cfg(feature = "std")]
 mod sync_client;
+#[cfg(feature = "std")]
+pub use sync_client::SyncClient;
 #[cfg(feature = "tokio")]
 mod tokio_server;
-pub use sync_client::SyncClient;
 
 // XXX
 pub fn parse_dir(mut bytes: &[u8]) -> Result<Vec<Stat<'_>>, Error> {
@@ -28,6 +36,21 @@ pub fn parse_dir(mut bytes: &[u8]) -> Result<Vec<Stat<'_>>, Error> {
         entries.push(entry);
     }
     Ok(entries)
+}
+
+/// Equivalent of `io::Write`, but only with `write_all` behavior, and with
+/// custom error type. Usable without std.
+pub trait Writer {
+    type Err;
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Err>;
+}
+
+#[cfg(feature = "std")]
+impl<T: std::io::Write> Writer for T {
+    type Err = std::io::Error;
+    fn write(&mut self, bytes: &[u8]) -> Result<(), Self::Err> {
+        self.write_all(bytes)
+    }
 }
 
 trait Field<'a>: Sized {
@@ -214,7 +237,7 @@ pub trait Message<'a>: Sized {
     /// Byte length of serialized message body
     fn size(&self) -> usize;
     /// Write serialized message body
-    fn write<T: io::Write>(&self, writer: T) -> io::Result<()>;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err>;
 }
 
 macro_rules! impl_empty_message {
@@ -230,7 +253,7 @@ macro_rules! impl_empty_message {
                 0
             }
 
-            fn write<T: io::Write>(&self, _: T) -> io::Result<()> {
+            fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
                 Ok(())
             }
         }
@@ -254,10 +277,10 @@ impl<'a> Message<'a> for TVersion<'a> {
         4 + 2 + self.version.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.msize.to_le_bytes())?;
-        writer.write_all(&(self.version.len() as u16).to_le_bytes())?;
-        writer.write_all(self.version.as_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.msize.to_le_bytes())?;
+        writer.write(&(self.version.len() as u16).to_le_bytes())?;
+        writer.write(self.version.as_bytes())?;
         Ok(())
     }
 }
@@ -281,10 +304,10 @@ impl<'a> Message<'a> for RVersion<'a> {
         4 + 2 + self.version.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.msize.to_le_bytes())?;
-        writer.write_all(&(self.version.len() as u16).to_le_bytes())?;
-        writer.write_all(self.version.as_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.msize.to_le_bytes())?;
+        writer.write(&(self.version.len() as u16).to_le_bytes())?;
+        writer.write(self.version.as_bytes())?;
         Ok(())
     }
 }
@@ -310,12 +333,12 @@ impl<'a> Message<'a> for TAuth<'a> {
         4 + 2 + self.uname.len() + 2 + self.aname.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.afid.0.to_le_bytes())?;
-        writer.write_all(&(self.uname.len() as u16).to_le_bytes())?;
-        writer.write_all(self.uname.as_bytes())?;
-        writer.write_all(&(self.aname.len() as u16).to_le_bytes())?;
-        writer.write_all(self.aname.as_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.afid.0.to_le_bytes())?;
+        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write(self.uname.as_bytes())?;
+        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write(self.aname.as_bytes())?;
         Ok(())
     }
 }
@@ -337,7 +360,7 @@ impl<'a> Message<'a> for RAuth {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, _writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -364,7 +387,7 @@ impl<'a> Message<'a> for RError<'a> {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, _writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -391,13 +414,13 @@ impl<'a> Message<'a> for TAttach<'a> {
         4 + 4 + 2 + self.uname.len() + 2 + self.aname.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&self.afid.0.to_le_bytes())?;
-        writer.write_all(&(self.uname.len() as u16).to_le_bytes())?;
-        writer.write_all(self.uname.as_bytes())?;
-        writer.write_all(&(self.aname.len() as u16).to_le_bytes())?;
-        writer.write_all(self.aname.as_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.afid.0.to_le_bytes())?;
+        writer.write(&(self.uname.len() as u16).to_le_bytes())?;
+        writer.write(self.uname.as_bytes())?;
+        writer.write(&(self.aname.len() as u16).to_le_bytes())?;
+        writer.write(self.aname.as_bytes())?;
         Ok(())
     }
 }
@@ -419,7 +442,7 @@ impl<'a> Message<'a> for RAttach {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -443,13 +466,13 @@ impl<'a> Message<'a> for TWalk<'a> {
         4 + 4 + 2 + 2 * self.wnames.len() + self.wnames.iter().map(|x| x.len()).sum::<usize>()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&self.newfid.0.to_le_bytes())?;
-        writer.write_all(&(self.wnames.len() as u16).to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.newfid.0.to_le_bytes())?;
+        writer.write(&(self.wnames.len() as u16).to_le_bytes())?;
         for wname in &self.wnames {
-            writer.write_all(&(wname.len() as u16).to_le_bytes())?;
-            writer.write_all(wname.as_bytes())?;
+            writer.write(&(wname.len() as u16).to_le_bytes())?;
+            writer.write(wname.as_bytes())?;
         }
         Ok(())
     }
@@ -481,7 +504,7 @@ impl<'a> Message<'a> for RWalk {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -503,9 +526,9 @@ impl<'a> Message<'a> for TOpen {
         4 + 1
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&[self.mode])?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&[self.mode])?;
         Ok(())
     }
 }
@@ -529,7 +552,7 @@ impl<'a> Message<'a> for ROpen {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -556,12 +579,12 @@ impl<'a> Message<'a> for TCreate<'a> {
         4 + 2 + self.name.len() + 4 + 1
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&(self.name.len() as u16).to_le_bytes())?;
-        writer.write_all(self.name.as_bytes())?;
-        writer.write_all(&self.perm.to_le_bytes())?;
-        writer.write_all(&[self.mode])?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&(self.name.len() as u16).to_le_bytes())?;
+        writer.write(self.name.as_bytes())?;
+        writer.write(&self.perm.to_le_bytes())?;
+        writer.write(&[self.mode])?;
         Ok(())
     }
 }
@@ -585,7 +608,7 @@ impl<'a> Message<'a> for RCreate {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -611,10 +634,10 @@ impl<'a> Message<'a> for TRead {
         4 + 8 + 4
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&self.offset.to_le_bytes())?;
-        writer.write_all(&self.count.to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.offset.to_le_bytes())?;
+        writer.write(&self.count.to_le_bytes())?;
         Ok(())
     }
 }
@@ -636,7 +659,7 @@ impl<'a> Message<'a> for RRead<'a> {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -659,10 +682,10 @@ impl<'a> Message<'a> for TWrite<'a> {
         4 + 8 + 2 + self.data.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&self.offset.to_le_bytes())?;
-        writer.write_all(&self.data)?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&self.offset.to_le_bytes())?;
+        writer.write(&self.data)?;
         Ok(())
     }
 }
@@ -684,8 +707,8 @@ impl<'a> Message<'a> for RWrite {
         4
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.count.to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.count.to_le_bytes())?;
         Ok(())
     }
 }
@@ -706,8 +729,8 @@ impl<'a> Message<'a> for TClunk {
         4
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
         Ok(())
     }
 }
@@ -733,8 +756,8 @@ impl<'a> Message<'a> for TRemove {
         4
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
         Ok(())
     }
 }
@@ -760,8 +783,8 @@ impl<'a> Message<'a> for TStat {
         4
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
         Ok(())
     }
 }
@@ -785,7 +808,7 @@ impl<'a> Message<'a> for RStat<'a> {
         todo!()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
+    fn write<T: Writer>(&self, _writer: &mut T) -> Result<(), T::Err> {
         todo!()
     }
 }
@@ -807,10 +830,10 @@ impl<'a> Message<'a> for TWStat<'a> {
         4 + 2 + self.stat.len()
     }
 
-    fn write<T: io::Write>(&self, mut writer: T) -> io::Result<()> {
-        writer.write_all(&self.fid.0.to_le_bytes())?;
-        writer.write_all(&(self.stat.len() as u16).to_le_bytes())?;
-        writer.write_all(&self.stat)?;
+    fn write<T: Writer>(&self, writer: &mut T) -> Result<(), T::Err> {
+        writer.write(&self.fid.0.to_le_bytes())?;
+        writer.write(&(self.stat.len() as u16).to_le_bytes())?;
+        writer.write(&self.stat)?;
         Ok(())
     }
 }

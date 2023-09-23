@@ -6,3 +6,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 tokio = { version = "1.29.1", features = ["io-util", "net", "rt", "sync"], optional = true }
+
+[features]
+default = ["std"]
+std = []
+tokio = ["std", "dep:tokio"]
