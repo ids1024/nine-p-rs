@@ -1,7 +1,7 @@
 // virtio transport for 9p
 
 use nine_p::{Header, Message, RError};
-use std::sync::Arc;
+use std::{io, sync::Arc};
 use virtio_core::spec::{Buffer, ChainBuilder, DescriptorFlags};
 
 // XXX Configurable? Default?
@@ -29,8 +29,9 @@ impl<'a> Transport<'a> {
         msg: T,
     ) -> Result<T::RMessage<'_>, nine_p::Error> {
         let header = nine_p::Header::for_message(&msg, tag);
-        header.write(&mut self.dma[..]).unwrap();
-        msg.write(&mut self.dma[7..]).unwrap();
+        let mut cursor = io::Cursor::new(&mut *self.dma as &mut [_]);
+        header.write(&mut cursor).unwrap();
+        msg.write(&mut cursor).unwrap();
 
         let command = ChainBuilder::new()
             .chain(Buffer::new(&self.dma))
